@@ -432,7 +432,7 @@ export default {
       }
       this.editingCell = null; this.floatStyle = {}
     },
-    resetEdit: function () {// 重置所有编辑
+    resetEdit: function () {// 重置所有编辑内容
       this.cusLabels = {}
       this.editingCell = null
       this.floatStyle = {}
