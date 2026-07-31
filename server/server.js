@@ -3,7 +3,7 @@ const cors = require('cors')
 const fetch = require('node-fetch')
 const dbModule = require('./db')
 const express = require('express')
-const { buildReportSQL } = require('../src/utils/reportUtils') 
+const { buildReportSQL } = require('../src/utils/reportUtils')
 
 const app = express()
 app.use(cors())
@@ -14,49 +14,52 @@ console.log('API Key:', API_KEY ?
      '已读取（前5位：' + API_KEY.slice(0, 5) + '）' : '未读取到')
 
 // ----提示词----
-const SCHEMA = `数据表 users，字段如下：
-id(整数,主键),
-status(状态，取值：活跃/未激活/已封禁),
-company(单位，取值：成都总部/重庆分部/绵阳分部/上海分部/广州分部),
-department(部门), "group"(小组),
-role(角色，取值：部长/组长/员工),
-name(姓名), age(年龄，整数), education(学历，取值：大专/本科/硕士/博士),
-email(邮箱), phone(电话), address(地址),
-project(项目，取值：项目A/项目B/项目C/项目D/未分配),
-year(年度，取值：2020/2021/2022/2023/2024),
-quarter(季度，取值：Q1/Q2/Q3/Q4),
-score(绩效分数，0-100), attendance(考勤分，0-100)
+const SCHEMA = `共5张表：
 
-单位-部门映射：成都总部(技术部/产品部)、重庆分部(运营部/客服部)、绵阳分部(研发部)、上海分部(市场部)、广州分部(销售部)
-各部门小组：技术部(前端组/后端组/运维组)、产品部(产品组/设计组)、运营部(策划组/执行组)、客服部(售前组/售后组)、研发部(移动组/平台组)、市场部(推广组/调研组)、销售部(演示组/渠道组)`
+1. 主数据表 YYGL_DATA_TABLE：
+ZZDWNM(组织单元内码,层级编码如'001','001001','001001001'),
+ZZDWMC(组织单元名称), ZZDWXH(组织单元序号),
+ND(年度,整数,取值2020-2025),
+GLJG(合作机构编码), GLJGMC(合作机构名称,取值:集团总部/战略投资部/区域管理中心), GLJGXH(合作机构序号),
+RWID(任务ID), RWMC(任务名称), RWLXNM(任务类型编码),
+XMID(项目ID), XMMC(项目名称),
+RYLBMC(人员类别,取值:普通/骨干/核心), DWGS(涉及考核单位数,文本),
+RYZS(员工总数,数值), JXZF(绩效总分,数值),
+HYRS(活跃人数), HYJXZF(活跃绩效总分),
+WJHRS(未激活人数), WJHJXZF(未激活绩效总分),
+YFBRS(已封禁人数), YFBJXZF(已封禁绩效总分),
+DCRS(待评估人数), DCJXZF(待评估绩效总分),
+HYL(活跃率%,数值), JXPJFL(绩效达标率%,数值),
+PARENTID(上级组织单元内码)
+
+2. 经纬度表 DW_LOCATION_TABLE：
+NM(主键,组织单元内码), JD(经度), WD(纬度), DMMC(地区名称), DMNM(单位名称)
+与主表通过 NM = ZZDWNM 关联
+
+3. 指标关联表 JX_BASE_TABLE：
+ZZDWNM(组织单元内码), RWID(任务ID), XMID(项目ID), ND(年度), RYLBMC(人员类别), JXKEY(指标主键)
+与主表通过 ZZDWNM 关联，与明细表通过 JXKEY 关联
+
+4. 指标明细表 JX_MX_TABLE：
+JXKEY(指标主键), TYPE(类型:jxlx=指标类型/title=指标名称/value=数值/jldw=计量单位), VALUE(值)
+KV结构，一条指标对应4行（jxlx/title/value/jldw）
+
+5. 字典表 YYGL_ZD_TABLE：
+SSLX(所属类型:RYLBMC=人员类别/GLJG=合作机构/JXSJ=绩效目标), MC(名称或值), NM(关联编码), XH(序号)`
 
 const SYSTEM_PROMPT = `你是一个数据分析助手。用户会用自然语言提问数据相关问题。
-
 请根据问题生成 SQLite 语法的 SQL 查询语句。
-
-返回格式必须严格为以下 JSON，不要包含任何其他文字、代码块标记或解释：
-{
-  "sql": "SELECT ... FROM users WHERE ... GROUP BY ...",
-  "chart_type": "bar",
-  "title": "图表标题"
-}
-
+返回格式必须严格为以下 JSON，不要包含任何其他文字或代码块标记：
+{"sql":"SELECT ...","chart_type":"bar","title":"图表标题"}
 chart_type 只能是：bar, line, pie, radar, scatter
-
 SQL 规则：
-1. "group" 是保留字，所有引用 group 字段的地方必须写成 "group"（双引号包裹）
-   例如 SELECT "group", COUNT(*) ... GROUP BY "group"
-2. 统计列必须使用以下固定别名（as 关键字）：
-   - 统计人数：COUNT(*) as count
-   - 平均分：ROUND(AVG(score), 1) as avg
-   - 最高分：MAX(score) as max
-   - 最低分：MIN(score) as min
-   - 平均考勤分：ROUND(AVG(attendance), 1) as avg_attendance
-3. 查询结果的第一列必须是分组维度（用于图表分类轴），第二列必须是统计结果（用于图表数值轴）
-4. 不要使用 SUM 函数，本项目没有求和场景
-
-数据表结构：
-${SCHEMA}`
+1. 员工总数汇总用 SUM(RYZS)，绩效总分汇总用 SUM(JXZF)
+2. 平均绩效分：ROUND(SUM(JXZF*1.0)/NULLIF(SUM(RYZS),0),1)
+3. 活跃率：ROUND(100.0*SUM(HYRS)/NULLIF(SUM(RYZS),0),1)
+4. 绩效达标率：ROUND(100.0*SUM(JXZF)/NULLIF(SUM(RYZS*100.0),0),1)
+5. 查询结果第一列是分组维度（图表分类轴），第二列是统计结果（图表数值轴）
+6. 按组织名称查询用 ZZDWMC，按年度查询用 ND
+数据表结构：${SCHEMA}`
 
 // ----AI 分析-----
 app.post('/api/ask', async (req, res) => {
@@ -74,7 +77,7 @@ app.post('/api/ask', async (req, res) => {
           'Authorization': `Bearer ${API_KEY}`
         },
         body: JSON.stringify({
-          model: 'deepseek-v4-flash',
+          model: 'qwen3.7-flash-2026-07-15',
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: question }
@@ -83,7 +86,7 @@ app.post('/api/ask', async (req, res) => {
         })
       }
     )
-    const data = await resp.json()// 解析响应
+    const data = await resp.json()
     console.log('API 响应：', JSON.stringify(data, null, 2))
     if (data.error) {
       return res.json({ success: false, error: data.error.message || JSON.stringify(data.error) })
@@ -91,7 +94,7 @@ app.post('/api/ask', async (req, res) => {
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
       return res.json({ success: false, error: 'API返回格式异常：' + JSON.stringify(data) })
     }
-    const content = data.choices[0].message.content// 提取并解析大模型的回答
+    const content = data.choices[0].message.content
     console.log('大模型原始返回：', content)
     const jsonStr = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim()
     const result = JSON.parse(jsonStr)
@@ -114,49 +117,61 @@ app.post('/api/query', (req, res) => {
   }
 })
 
-// 查询用户列表（支持搜索）
+// 查询数据列表（支持搜索）
 app.get('/api/users', (req, res) => {
   const search = req.query.search || ''
-  let users
+  let data
   if (search) {
     const fields = [
-      'status', 'company', 'department', '"group"', 'role',
-      'name', 'age', 'education', 'email', 'phone', 'address',
-      'project', 'year', 'quarter'
+      'ZZDWNM', 'ZZDWMC', 'CAST(ND AS TEXT)', 'GLJGMC', 'RWID', 'RWMC',
+      'XMID', 'XMMC', 'RYLBMC', 'DWGS'
     ]
-    const sql = 'SELECT * FROM users WHERE ' + fields.map(f => f + ' LIKE ?').join(' OR ')
+    const sql = 'SELECT rowid as id, * FROM YYGL_DATA_TABLE WHERE ' +
+      fields.map(f => f + ' LIKE ?').join(' OR ') +
+      ' ORDER BY ZZDWNM, ND DESC'
     const params = fields.map(() => '%' + search + '%')
-    users = dbModule.queryAll(sql + ' ORDER BY id DESC', params)
+    data = dbModule.queryAll(sql, params)
   } else {
-    users = dbModule.queryAll('SELECT * FROM users ORDER BY id DESC')
+    data = dbModule.queryAll(
+      'SELECT rowid as id, * FROM YYGL_DATA_TABLE ORDER BY ZZDWNM, ND DESC'
+    )
   }
-  res.json({ success: true, data: users })
+  res.json({ success: true, data: data })
 })
 
-// 新增用户
+// 新增数据
 app.post('/api/users', (req, res) => {
   const u = req.body
   const result = dbModule.run(
-    'INSERT INTO users (status, company, department, "group", role, name, age, education, email, phone, address, project, year, quarter, score, attendance) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    ['未激活', u.company, u.department, u.group, u.role || '员工', u.name, u.age || 25, u.education || '本科', u.email, u.phone || '未填写', u.address || '未填写', u.project || '未分配', u.year || '2024', u.quarter || 'Q1', 0, 0]
+    'INSERT INTO YYGL_DATA_TABLE (ZZDWNM,ZZDWMC,ZZDWXH,ND,GLJG,GLJGMC,GLJGXH,RWID,RWMC,RWLXNM,XMID,XMMC,RYLBMC,DWGS,RYZS,JXZF,HYRS,HYJXZF,WJHRS,WJHJXZF,YFBRS,YFBJXZF,DCRS,DCJXZF,HYL,JXPJFL,PARENTID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [u.ZZDWNM, u.ZZDWMC, u.ZZDWXH, u.ND, u.GLJG, u.GLJGMC, u.GLJGXH,
+     u.RWID, u.RWMC, u.RWLXNM, u.XMID, u.XMMC, u.RYLBMC, u.DWGS,
+     u.RYZS||0, u.JXZF||0, u.HYRS||0, u.HYJXZF||0,
+     u.WJHRS||0, u.WJHJXZF||0, u.YFBRS||0, u.YFBJXZF||0,
+     u.DCRS||0, u.DCJXZF||0, u.HYL||0, u.JXPJFL||0, u.PARENTID]
   )
   if (result.changes === 0) return res.json({ success: false, error: '新增失败' })
   res.json({ success: true, id: result.lastInsertRowid })
 })
 
-// 编辑用户
+// 编辑数据
 app.put('/api/users/:id', (req, res) => {
   const u = req.body
   dbModule.run(
-    'UPDATE users SET status=?, company=?, department=?, "group"=?, role=?, name=?, age=?, education=?, email=?, phone=?, address=?, project=?, year=?, quarter=?, score=?, attendance=? WHERE id=?',
-    [u.status, u.company, u.department, u.group, u.role, u.name, u.age, u.education, u.email, u.phone, u.address, u.project, u.year, u.quarter, u.score, u.attendance, Number(req.params.id)]
+    'UPDATE YYGL_DATA_TABLE SET ZZDWNM=?,ZZDWMC=?,ZZDWXH=?,ND=?,GLJG=?,GLJGMC=?,GLJGXH=?,RWID=?,RWMC=?,RWLXNM=?,XMID=?,XMMC=?,RYLBMC=?,DWGS=?,RYZS=?,JXZF=?,HYRS=?,HYJXZF=?,WJHRS=?,WJHJXZF=?,YFBRS=?,YFBJXZF=?,DCRS=?,DCJXZF=?,HYL=?,JXPJFL=?,PARENTID=? WHERE rowid=?',
+    [u.ZZDWNM, u.ZZDWMC, u.ZZDWXH, u.ND, u.GLJG, u.GLJGMC, u.GLJGXH,
+     u.RWID, u.RWMC, u.RWLXNM, u.XMID, u.XMMC, u.RYLBMC, u.DWGS,
+     u.RYZS, u.JXZF, u.HYRS, u.HYJXZF,
+     u.WJHRS, u.WJHJXZF, u.YFBRS, u.YFBJXZF,
+     u.DCRS, u.DCJXZF, u.HYL, u.JXPJFL, u.PARENTID,
+     Number(req.params.id)]
   )
   res.json({ success: true })
 })
 
-// 删除用户
+// 删除数据
 app.delete('/api/users/:id', (req, res) => {
-  dbModule.run('DELETE FROM users WHERE id=?', [Number(req.params.id)])
+  dbModule.run('DELETE FROM YYGL_DATA_TABLE WHERE rowid=?', [Number(req.params.id)])
   res.json({ success: true })
 })
 
@@ -164,7 +179,9 @@ app.delete('/api/users/:id', (req, res) => {
 app.post('/api/users/batch-delete', (req, res) => {
   const ids = req.body.ids
   const placeholders = ids.map(() => '?').join(',')
-  const result = dbModule.run(`DELETE FROM users WHERE id IN (${placeholders})`, ids)
+  const result = dbModule.run(
+    'DELETE FROM YYGL_DATA_TABLE WHERE rowid IN (' + placeholders + ')', ids
+  )
   res.json({ success: true, deleted: result.changes })
 })
 
@@ -176,6 +193,55 @@ app.post('/api/report', (req, res) => {
     console.log('报表SQL：', sql)
     const rows = dbModule.queryAll(sql)
     res.json({ success: true, data: rows, sql: sql })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+// 查询经纬度数据（供热力图使用）
+app.get('/api/locations', (req, res) => {
+  try {
+    var rows = dbModule.queryAll('SELECT * FROM DW_LOCATION_TABLE')
+    res.json({ success: true, data: rows })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+// ----字典查询----
+app.get('/api/dict/:type', (req, res) => {
+  try {
+    var rows = dbModule.queryAll(
+      'SELECT MC, NM, XH FROM YYGL_ZD_TABLE WHERE SSLX = ? ORDER BY XH',
+      [req.params.type]
+    )
+    res.json({ success: true, data: rows })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+// 更新字典
+app.put('/api/dict/:type', (req, res) => {
+  try {
+    var mc = req.body.MC
+    if (mc == null) return res.json({ success: false, error: '缺少 MC 参数' })
+    dbModule.run('UPDATE YYGL_ZD_TABLE SET MC = ? WHERE SSLX = ?', [mc, req.params.type])
+    res.json({ success: true })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+// ----指标查询----
+app.get('/api/indicators', (req, res) => {
+  try {
+    var zzdwnm = req.query.zzdwnm || ''
+    if (!zzdwnm) return res.json({ success: true, data: [] })
+    var rows = dbModule.queryAll(
+      'SELECT b.ZZDWNM, b.RWID, b.XMID, b.ND, b.RYLBMC, b.JXKEY, m.TYPE, m.VALUE FROM JX_BASE_TABLE b LEFT JOIN JX_MX_TABLE m ON b.JXKEY = m.JXKEY WHERE b.ZZDWNM = ? ORDER BY b.JXKEY, m.TYPE',
+      [zzdwnm]
+    )
+    res.json({ success: true, data: rows })
   } catch (e) {
     res.json({ success: false, error: e.message })
   }

@@ -1,88 +1,82 @@
+// 组织单元名称列表（弹窗下拉用）
+var ORG_NAMES = [
+  '成都总部', '技术部', '产品部', '前端组', '后端组', '运维组', '产品组', '设计组',
+  '重庆分部', '运营部', '客服部', '策划组', '执行组', '售前组', '售后组',
+  '绵阳分部', '研发部', '移动组', '平台组',
+  '上海分部', '市场部', '推广组', '调研组',
+  '广州分部', '销售部', '演示组', '渠道组'
+]
 
-// 用户字段配置（弹窗表单） 
+// 用户字段配置（弹窗表单）
 var FIELDS = [
-  { key: 'status',     label: '状态',     modes: ['edit', 'detail'],         options: ['活跃', '未激活', '已封禁'] },
-  { key: 'company',    label: '单位',     modes: ['edit', 'detail', 'add'], options: ['总部', '重庆分部', '绵阳分部', '上海分部', '广州分部'] },
-  { key: 'department', label: '部门',     modes: ['edit', 'detail'], options: [] },
-  { key: 'group',      label: '小组',     modes: ['edit', 'detail'],        options: [] },
-  { key: 'role',       label: '角色',     modes: ['edit', 'detail', 'add'], options: ['部长', '组长', '员工'] },
-  { key: 'name',       label: '姓名',     modes: ['edit', 'detail', 'add'] },
-  { key: 'age',        label: '年龄',     modes: ['edit', 'detail', 'add'] },
-  { key: 'education',  label: '学历',     modes: ['edit', 'detail', 'add'], options: ['大专', '本科', '硕士', '博士'] },
-  { key: 'email',      label: '邮箱',     modes: ['edit', 'detail', 'add'] },
-  { key: 'phone',      label: '手机号',   modes: ['edit', 'detail', 'add'] },
-  { key: 'address',    label: '地址',     modes: ['edit', 'detail', 'add'] },
-  { key: 'project',    label: '项目',     modes: ['edit', 'detail'], options: ['项目A', '项目B', '项目C', '项目D', '未分配'] },
-  { key: 'year',       label: '年度',     modes: ['edit', 'detail'], options: ['2020', '2021', '2022', '2023', '2024'] },
-  { key: 'quarter',    label: '季度',     modes: ['edit', 'detail'], options: ['Q1', 'Q2', 'Q3', 'Q4'] },
-  { key: 'score',      label: '绩效分',   modes: ['edit', 'detail'] },
-  { key: 'attendance', label: '考勤分',   modes: ['edit', 'detail'] }
+  { key: 'ZZDWNM',   label: '组织编码',     modes: ['detail'] },
+  { key: 'ZZDWMC',   label: '单位名称',     modes: ['edit', 'detail', 'add'], options: ORG_NAMES },
+  { key: 'ND',       label: '年度',         modes: ['edit', 'detail', 'add'], options: ['2020','2021','2022','2023','2024','2025'] },
+  { key: 'GLJGMC',   label: '管理机构',     modes: ['edit', 'detail', 'add'], options: ['集团总部'] },
+  { key: 'RWMC',     label: '任务名称',     modes: ['edit', 'detail', 'add'], options: ['年度绩效考核','专项技能评估'] },
+  { key: 'XMMC',     label: '项目名称',     modes: ['edit', 'detail', 'add'], options: ['项目A','项目B','项目C'] },
+  { key: 'RYLBMC',   label: '人员类别',     modes: ['edit', 'detail', 'add'], options: [] },
+  { key: 'DWGS',     label: '考核单位数',   modes: ['edit', 'detail', 'add'] },
+  { key: 'RYZS',     label: '员工总数',     modes: ['edit', 'detail'] },
+  { key: 'JXZF',     label: '绩效总分',     modes: ['edit', 'detail'] },
+  { key: 'HYRS',     label: '活跃人数',     modes: ['edit', 'detail'] },
+  { key: 'HYJXZF',   label: '活跃绩效总分', modes: ['edit', 'detail'] },
+  { key: 'WJHRS',    label: '未激活人数',   modes: ['edit', 'detail'] },
+  { key: 'YFBRS',    label: '已封禁人数',   modes: ['edit', 'detail'] },
+  { key: 'DCRS',     label: '待评估人数',   modes: ['edit', 'detail'] },
+  { key: 'HYL',      label: '活跃率%',      modes: ['edit', 'detail'] },
+  { key: 'JXPJFL',   label: '绩效达标率%',  modes: ['edit', 'detail'] },
+  { key: 'PARENTID', label: '上级编码',     modes: ['detail'] }
 ]
 
-// 单位-部门映射
-var DEPTS = {
-  '总部':    ['技术部', '产品部'],
-  '重庆分部': ['运营部', '客服部'],
-  '绵阳分部': ['研发部'],
-  '上海分部': ['市场部'],
-  '广州分部': ['销售部'] 
-}
-
-// 部门-小组映射
-var GROUPS = {
-  '技术部': ['前端组', '后端组', '运维组'],
-  '市场部': ['推广组', '调研组'],
-  '销售部': ['演示组', '渠道组'],
-  '产品部': ['产品组', '设计组'],
-  '研发部': ['移动组', '平台组'],
-  '运营部': ['策划组', '执行组'],
-  '客服部': ['售前组', '售后组']
-}
-
-// 分析维度  
+// 分析维度
 var DIM_OPTS = [
-  { label: '年度', value: 'year' },
-  { label: '单位', value: 'company' },
-  { label: '人员', value: 'role' },
-  { label: '指标', value: 'level' }
+  { label: '年度', value: 'ND' },
+  { label: '单位', value: 'ZZDWMC' },
+  { label: '项目', value: 'XMMC' },
+  { label: '任务', value: 'RWMC' }
 ]
 
-// 维度钻取链  
+// 维度钻取链
 var DP_MAP = {
-  year:    ['year', 'company', 'department', 'group', 'name'],
-  company: ['company', 'department', 'group', 'name'],
-  role:    ['role', 'company', 'department', 'group', 'name'],
-  level:   ['level', 'company', 'department', 'group', 'name']
+  ND:     ['ND',     'ZZDWMC', 'ZZDWMC', 'ZZDWMC', 'RYLBMC'],
+  ZZDWMC: ['ZZDWMC', 'ZZDWMC', 'ZZDWMC', 'RYLBMC'],
+  XMMC:   ['XMMC',   'ZZDWMC', 'ZZDWMC', 'ZZDWMC', 'RYLBMC'],
+  RWMC:   ['RWMC',   'ZZDWMC', 'ZZDWMC', 'ZZDWMC', 'RYLBMC']
 }
 
 // 不支持维度切换的图表类型
-var DNS = [ 'wordcloud', 'sankey', 'boxplot', 'nestedpie', 'funnel']
+var DNS = ['wordcloud', 'sankey', 'boxplot', 'nestedpie', 'funnel']
+
 // 支持指标切换的图表类型
 var MYS = ['pie', 'rose', 'funnel']
-// ---- 指标等级 ----
-var LEVEL_ORDER = ['待评估', '不合格', '合格', '良好', '优秀']
-function getLevel(score) {
-  var s = Number(score) || 0
-  if (s === 0) return '待评估'
-  if (s < 60) return '不合格'
-  if (s < 80) return '合格'
-  if (s < 90) return '良好'
-  return '优秀'
+
+// ---- 组织层级 ----
+var LEVEL_ORDER = ['一级单位', '二级单位', '三级单位']
+
+function getOrgLevel(zzdwnm) {
+  if (!zzdwnm) return '未知'
+  var len = String(zzdwnm).length
+  if (len <= 3) return '一级单位'
+  if (len <= 6) return '二级单位'
+  return '三级单位'
 }
 
-// 表格列配置  
+// 表格列配置
 var TABLECOLS = [
-  { label: '单位',   prop: 'company', width: 100 },
-  { label: '部门',   prop: 'department', width: 100 },
-  { label: '小组',   prop: 'group', width: 100 },
-  { label: '角色',   prop: 'role', width: 70 },
-  { label: '姓名',   prop: 'name', width: 70 },
-  { label: '年龄',   prop: 'age', width: 70 },
-  { label: '学历',   prop: 'education', width: 70 },
-  { label: '邮箱',   prop: 'email', width: 200},
-  { label: '电话',   prop: 'phone' }
+  { label: '单位名称',   prop: 'ZZDWMC',  width: 120 },
+  { label: '年度',       prop: 'ND',      width: 70 },
+  { label: '管理机构',   prop: 'GLJGMC',  width: 100 },
+  { label: '任务名称',   prop: 'RWMC',    width: 120 },
+  { label: '项目名称',   prop: 'XMMC',    width: 90 },
+  { label: '人员类别',   prop: 'RYLBMC',  width: 80 },
+  { label: '员工总数',   prop: 'RYZS',    width: 80 },
+  { label: '绩效总分',   prop: 'JXZF',    width: 80 },
+  { label: '活跃率',     prop: 'HYL',     width: 80 },
+  { label: '绩效达标率', prop: 'JXPJFL',  width: 90 }
 ]
 
 export {
-  FIELDS, DEPTS, GROUPS, DIM_OPTS, DP_MAP, DNS, MYS, LEVEL_ORDER, getLevel, TABLECOLS 
+  FIELDS, ORG_NAMES, DIM_OPTS, DP_MAP, DNS, MYS,
+  LEVEL_ORDER, getOrgLevel, TABLECOLS
 }
