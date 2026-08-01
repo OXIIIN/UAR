@@ -1,6 +1,7 @@
 <template>
   <div class="report-page" id="reportPage" :style="{ zoom: pageZoom }">
-    <!-- 顶部栏 -->
+
+    <!-- ==================== 顶部栏 ==================== -->
     <div class="top-bar no-print">
       <div><h1>统计报表</h1><span>多维度数据汇总分析</span></div>
       <div>
@@ -11,12 +12,14 @@
         <el-button type="danger" plain @click="$router.push('/')">返回管理页</el-button>
       </div>
     </div>
-    <!-- 封面页 -->
+
+    <!-- ==================== 封面页 ==================== -->
     <div class="cover-page" v-if="printSettings.showCover">
       <div class="cover-title">{{ printSettings.coverTitle }}</div>
       <div class="cover-subtitle">{{ printSettings.coverSubtitle }}</div>
     </div>
-    <!-- 智能分析 -->
+
+    <!-- ==================== 智能分析面板 ==================== -->
     <div class="ai-panel no-print">
       <div class="ai-header">智能分析</div>
       <div class="ai-input-row">
@@ -39,8 +42,11 @@
         </div>
       </div>
     </div>
-    <!-- 表格区域 -->
+
+    <!-- ==================== 报表表格区域 ==================== -->
     <div class="table-section" :class="{'edit-active': isEdit}" style="position:relative;">
+
+      <!-- ---- 工具栏---- -->
       <div class="section-header no-print">
         <div class="header-left">
           <span class="ctrl-label">统计维度：</span>
@@ -54,11 +60,17 @@
           <el-button size="mini" type="danger" plain @click="openHeaderSets">设置表头</el-button>
         </div>
       </div>
+
+      <!-- ---- 浮动输入框 ---- -->
       <input v-if="editingCell" ref="floatInput" class="floating-input" :style="floatStyle"
         @blur="finishEdit()" @keyup.enter="finishEdit()" />
+
+      <!-- ---- 报表表格主体 ---- -->
       <el-table :data="reportRows" border style="width:100%" size="medium"
         :span-method="mergeSpan"
         :header-cell-style="{background:'#1a2745',color:'#e2e2e2',fontWeight:'bold'}">
+
+        <!-- 维度列 -->
         <el-table-column v-for="dim in selectedDims" :key="'dim_'+dim" :label="getLabel(dim)" min-width="100" align="center">
           <template slot="header">
             <span class="header-text" :class="{editable: isEdit}"
@@ -66,46 +78,72 @@
           </template>
           <template slot-scope="s"><span>{{ s.row[dim] || '未知' }}</span></template>
         </el-table-column>
+
+        <!-- 固定信息列 -->
         <el-table-column v-for="gc in fixedCols" :key="'gc_'+gc.key" :prop="gc.key" min-width="100" align="center">
           <template slot="header">
             <span class="header-text" :class="{editable: isEdit}"
               @dblclick="isEdit && startEdit('group', gc.key, $event)">{{ getLabel(gc.key) }}</span>
           </template>
         </el-table-column>
+
+        <!-- 活动信息列 -->
         <template v-for="group in visibleCols">
+
+          <!-- 列组容器（如"人员状态分布"、"达标率"） -->
           <el-table-column :key="'grp_'+group.key" align="center">
             <template slot="header">
-              <span class="header-text" :class="{editable: isEdit}" @dblclick="isEdit && startEdit('headerGroup', group.key, $event)">{{ getLabel(group.key) }}</span>
+              <span class="header-text" :class="{editable: isEdit}"
+                @dblclick="isEdit && startEdit('headerGroup', group.key, $event)">{{ getLabel(group.key) }}</span>
             </template>
+
             <template v-for="child in group.children">
-              <el-table-column v-if="!child.children" :key="'leaf_'+group.key+'_'+child.key" :prop="child.key" align="center" min-width="90">
+
+              <!--两层结构-->
+              <el-table-column v-if="!child.children"
+                :key="'leaf_'+group.key+'_'+child.key"
+                :prop="child.key" align="center" min-width="90">
                 <template slot="header">
-                  <span class="header-text" :class="{editable: isEdit}" @dblclick="isEdit && startEdit('leaf', child.key, $event)">{{ getLabel(child.key) }}</span>
+                  <span class="header-text" :class="{editable: isEdit}"
+                    @dblclick="isEdit && startEdit('leaf', child.key, $event)">{{ getLabel(child.key) }}</span>
                 </template>
                 <template slot-scope="s"><span>{{ formatVal(s.row[child.key], child.key) }}</span></template>
               </el-table-column>
-              <el-table-column v-else :key="'brch_'+group.key+'_'+child.key" align="center">
+
+              <!-- 三层结构 -->
+              <el-table-column v-else
+                :key="'brch_'+group.key+'_'+child.key"
+                align="center">
                 <template slot="header">
-                  <span class="header-text" :class="{editable: isEdit}" @dblclick="isEdit && startEdit('leaf', child.key, $event)">{{ getLabel(child.key) }}</span>
+                  <span class="header-text" :class="{editable: isEdit}"
+                    @dblclick="isEdit && startEdit('leaf', child.key, $event)">{{ getLabel(child.key) }}</span>
                 </template>
-                <el-table-column v-for="leaf in child.children" :key="'lf_'+group.key+'_'+child.key+'_'+leaf.key" :prop="leaf.key" align="center" min-width="80">
+                <!-- 遍历第三层叶子节点 -->
+                <el-table-column v-for="leaf in child.children"
+                  :key="'lf_'+group.key+'_'+child.key+'_'+leaf.key"
+                  :prop="leaf.key" align="center" min-width="80">
                   <template slot="header">
-                    <span class="header-text" :class="{editable: isEdit}" @dblclick="isEdit && startEdit('leaf', leaf.key, $event)">{{ getLabel(leaf.key) }}</span>
+                    <span class="header-text" :class="{editable: isEdit}"
+                      @dblclick="isEdit && startEdit('leaf', leaf.key, $event)">{{ getLabel(leaf.key) }}</span>
                   </template>
                   <template slot-scope="s"><span>{{ formatVal(s.row[leaf.key], leaf.key) }}</span></template>
                 </el-table-column>
               </el-table-column>
+
             </template>
           </el-table-column>
         </template>
+
       </el-table>
     </div>
-    <!-- 封底 -->
+
+    <!-- ==================== 封底 ==================== -->
     <div class="cover-page" v-if="printSettings.showBackCover">
       <div class="cover-title">{{ printSettings.backCoverTitle }}</div>
       <div class="cover-subtitle">{{ printSettings.backCoverSubtitle }}</div>
     </div>
-    <!-- 设置表头弹窗 -->
+
+    <!-- ==================== 设置表头弹窗 ==================== -->
     <el-dialog title="设置表头" :visible.sync="headerSettingsVis" width="400px" top="40vh">
       <div v-for="group in allMovGroups" :key="'cfg_'+group.key" style="margin-bottom:20px;">
         <el-checkbox v-model="headerChecked[group.key]">{{ group.label }}</el-checkbox>
@@ -115,27 +153,32 @@
         <el-button @click="headerSettingsVis=false">关闭</el-button>
       </span>
     </el-dialog>
-    <!-- 打印设置弹窗 -->
+
+    <!-- ==================== 打印设置弹窗 ==================== -->
     <el-dialog title="打印设置" :visible.sync="isPrint" width="520px">
-      <div class="ps-item"><div class="popup-label">页边距</div>
+      <div class="ps-item">
+        <div class="popup-label">页边距</div>
         <el-radio-group v-model="printSettings.margin">
           <el-radio label="narrow">窄 (10mm)</el-radio>
           <el-radio label="normal">正常 (15mm)</el-radio>
           <el-radio label="wide">宽 (20mm)</el-radio>
         </el-radio-group>
       </div>
-      <div class="ps-item"><div class="popup-label">纸张大小</div>
+      <div class="ps-item">
+        <div class="popup-label">纸张大小</div>
         <el-radio-group v-model="printSettings.paperSize">
           <el-radio v-for="p in ['A4','A3','Letter','B5']" :key="p" :label="p">{{ p }}</el-radio>
         </el-radio-group>
       </div>
-      <div class="ps-item"><div class="popup-label">打印方向</div>
+      <div class="ps-item">
+        <div class="popup-label">打印方向</div>
         <el-radio-group v-model="printSettings.orientation">
           <el-radio label="portrait">纵向</el-radio>
           <el-radio label="landscape">横向</el-radio>
         </el-radio-group>
       </div>
-      <div class="ps-item" v-for="c in covers" :key="c.label" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+      <div class="ps-item" v-for="c in covers" :key="c.label"
+        style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
         <div style="display:flex;align-items:center;gap:8px;">
           <div class="popup-label" style="margin-bottom:0;">{{ c.label }}</div>
           <el-switch v-model="printSettings[c.show]"></el-switch>
@@ -150,69 +193,55 @@
         <el-button @click="isPrint=false">关闭</el-button>
       </span>
     </el-dialog>
+
   </div>
 </template>
 
 <script>
 import { exportCSV, exportWord, exportPDF } from '../utils/exportUtils'
 import { getChartOption } from '../utils/chartUtils'
-import { MARGIN_MAP, DIM_OPTIONS, FIXED_COLUMNS, MOV_GROUPS, LABEL_FLAT, DEFAULT_COLUMNS, movColumns, MET_LABELS } from '../utils/reportUtils'
+import {
+  MARGIN_MAP, DIM_OPTIONS, FIXED_COLUMNS, MOV_GROUPS,
+  LABEL_FLAT, DEFAULT_COLUMNS, movColumns, MET_LABELS,
+  extractLabels, applyLabels
+} from '../utils/reportUtils'
 import * as echarts from 'echarts'
-
-// 从 HEADER JSON 树提取 fieldKey→label / groupKey→label 的扁平映射
-function extractLabels(nodes) {
-  var map = {}
-  function walk(list) {
-    list.forEach(function (n) {
-      if (n.type === 'field' && n.fieldKey) {
-        map[n.fieldKey] = n.label
-      }
-      if (n.type === 'group') {
-        map[n.id.replace(/^g-/, '')] = n.label
-      }
-      if (n.children) walk(n.children)
-    })
-  }
-  walk(nodes)
-  return map
-}
-
-// 将编辑后的 labels 回写到 headerTree 的对应节点
-function applyLabels(nodes, labels) {
-  function walk(list) {
-    list.forEach(function (n) {
-      if (n.type === 'field' && n.fieldKey && labels[n.fieldKey] !== undefined) {
-        n.label = labels[n.fieldKey]
-      }
-      if (n.type === 'group') {
-        var key = n.id.replace(/^g-/, '')
-        if (labels[key] !== undefined) n.label = labels[key]
-      }
-      if (n.children) walk(n.children)
-    })
-  }
-  walk(nodes)
-  return nodes
-}
 
 export default {
   name: 'ReportPage',
   data: function () {
     return {
+      // ---- 页面基础 ----
       pageZoom: 0.8,
-      headerTree: null,   // 从字典表加载的原始 HEADER JSON 树
-      locations: [],
-      aiQuestion: '', aiLoading: false, aiResult: null, aiChart: null, aiSqlRows: null,
-      users: [], reportRows: [],
-      dimOptions: DIM_OPTIONS, selectedDims: ['zzdwmc'],
-      fixedCols: FIXED_COLUMNS, allMovGroups: MOV_GROUPS,
-      headerSettingsVis: false,
-      isEdit: false, editingCell: null, floatStyle: {}, cusLabels: {},
-      selectedCols: DEFAULT_COLUMNS.slice(),
-      headerChecked: MOV_GROUPS.reduce(function (o, g) {
-        o[g.key] = DEFAULT_COLUMNS.indexOf(g.key) !== -1; return o
-      }, {}),
-      isPrint: false,
+
+      // ---- 数据源 ----
+      reportRows: [],             // 报表聚合数据（由 /api/report 返回）
+
+      // ---- 智能分析 ----
+      aiQuestion: '',             // 用户输入的自然语言问题
+      aiLoading: false,           // 分析中 loading 状态
+      aiResult: null,             // AI 返回的 内容
+      aiChart: null,              // AI 图表的 ECharts 实例
+      aiSqlRows: null,            // SQL 执行结果的行数据
+
+      // ---- 报表配置 ----
+      dimOptions: DIM_OPTIONS,    // 维度选项（年度/单位/任务/项目）
+      selectedDims: ['zzdwmc'],   // 当前选中的维度（多选）
+      fixedCols: FIXED_COLUMNS,   // 固定信息列
+      allMovGroups: MOV_GROUPS,   // 活动信息列（供"设置表头"弹窗使用）
+      selectedCols: DEFAULT_COLUMNS.slice(),  // 当前选中的活动列组 key
+      headerChecked: {},          // "设置表头"弹窗中的勾选状态
+
+      // ---- 表头编辑 ----
+      headerTree: null,           // 从数据库加载的原始 HEADER JSON 树
+      cusLabels: {},              // 用户自定义的标签映射 { key: customLabel }
+      isEdit: false,              // 是否处于编辑模式
+      editingCell: null,          // 当前正在编辑的单元格 { type, key }
+      floatStyle: {},             // 浮动输入框的定位样式
+      headerSettingsVis: false,   // "设置表头"弹窗是否可见
+
+      // ---- 打印设置 ----
+      isPrint: false,             // 打印设置弹窗是否可见
       covers: [
         { show: 'showCover', title: 'coverTitle', subtitle: 'coverSubtitle', label: '封面' },
         { show: 'showBackCover', title: 'backCoverTitle', subtitle: 'backCoverSubtitle', label: '封底' }
@@ -222,267 +251,370 @@ export default {
         showCover: true, coverTitle: '', coverSubtitle: '',
         showBackCover: true, backCoverTitle: '', backCoverSubtitle: ''
       },
+
+      // ---- 指标标签（供 AI 查询结果表头中文化） ----
       MET_LABELS: MET_LABELS
     }
   },
 
   computed: {
-    visibleCols: function () { return movColumns(this.selectedCols) }
+    visibleCols: function () { // 根据用户勾选的活动列组 key，返回对应的 MOV_GROUPS 子集
+     return movColumns(this.selectedCols) 
+    }
   },
 
   watch: {
-    selectedDims: function (val) {
+    selectedDims: function (val) {// 维度变化时重新查询报表数据
       if (!val.length) { this.selectedDims = ['zzdwmc']; return }
       this.loadReportData()
     },
-    selectedCols: function () { this.loadReportData() }
+    
+    selectedCols: function () {// 活动列组变化时重新查询报表数据
+      this.loadReportData()
+    }
   },
 
+
   mounted: function () {
-  this.loadUsers()
-  this.loadReportData()
-  this.loadHeaderConfig()    // ← 新增
-},
-  beforeDestroy: function () { if (this.aiChart) { this.aiChart.dispose(); this.aiChart = null } },
+    this.loadReportData()       // 报表聚合数据
+    this.loadHeaderConfig()     // 从数据库加载自定义表头
+  },
+
+  
+  beforeDestroy: function () {// 组件销毁前清理 AI 图表实例
+    if (this.aiChart) {
+      this.aiChart.dispose()
+      this.aiChart = null
+    }
+  },
+
 
   methods: {
-    // 加载 HEADER 配置
-loadHeaderConfig: function () {
-  var self = this
-  fetch('/api/dict/HEADER').then(function (r) { return r.json() })
-    .then(function (j) {
-      if (!j.success || !j.data || !j.data.length) return
-      try {
-        var tree = JSON.parse(j.data[0].MC)
-        self.headerTree = tree
-        self.cusLabels = extractLabels(tree)
-        // 备份原始配置到 INITHEADER（仅首次）
-        fetch('/api/dict/INITHEADER').then(function (r2) { return r2.json() })
-          .then(function (j2) {
-            var needBackup = !j2.success || !j2.data || !j2.data.length || !j2.data[0].MC
-            if (needBackup) {
-              fetch('/api/dict/INITHEADER', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ MC: j.data[0].MC })
-              })
-            }
-          })
-      } catch (e) { console.warn('HEADER 解析失败', e) }
-    }).catch(function () {})
-},
 
-// 保存 HEADER 配置到字典表
-saveHeaderConfig: function () {
-  if (!this.headerTree) return
-  var self = this
-  var updated = applyLabels(JSON.parse(JSON.stringify(self.headerTree)), self.cusLabels)
-  fetch('/api/dict/HEADER', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ MC: JSON.stringify(updated) })
-  }).then(function (r) { return r.json() })
-    .then(function (j) {
-      if (j.success) self.$message.success('表头已保存')
-      else self.$message.error('保存失败')
-    }).catch(function () { self.$message.error('保存失败') })
-},
-    loadLocations: function () {
-      var self = this
-      fetch('/api/locations')
-        .then(function (r) { return r.json() })
-        .then(function (j) { if (j.success) self.locations = j.data })
-        .catch(function () {})
-    },
-    loadUsers: function () {
-      var self = this
-      fetch('/api/users').then(function (r) { return r.json() })
-        .then(function (j) { if (j.success) self.users = j.data })
-        .catch(function (e) { self.$message.error('数据加载失败：' + e.message) })
-    },
-    loadReportData: function () {
+    // ================================================================
+    //  数据加载
+    // ================================================================
+    loadReportData: function () {// 加载报表聚合数据
       var self = this
       fetch('/api/report', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dims: self.selectedDims, selectedGroups: self.selectedCols })
-      }).then(function (r) { return r.json() })
+      })
+        .then(function (r) { return r.json() })
         .then(function (j) {
           if (j.success) self.reportRows = j.data || []
           else self.$message.error(j.error || '报表数据加载失败')
-        }).catch(function (e) { self.$message.error('请求失败：' + e.message) })
+        })
+        .catch(function (e) { self.$message.error('请求失败：' + e.message) })
     },
 
-    // ---- 导出 ----
-    getTableData: function () {
+    loadHeaderConfig: function () {// 加载表头配置
+      var self = this
+      fetch('/api/dict/HEADER')
+        .then(function (r) { return r.json() })
+        .then(function (j) {
+          if (!j.success || !j.data || !j.data.length) return
+          try {
+            var tree = JSON.parse(j.data[0].MC)
+            self.headerTree = tree
+            self.cusLabels = extractLabels(tree)
+            // 备份原始配置到 INITHEADER（仅首次：INITHEADER 为空时才写入）
+            fetch('/api/dict/INITHEADER')
+              .then(function (r2) { return r2.json() })
+              .then(function (j2) {
+                var needBackup = !j2.success || !j2.data || !j2.data.length || !j2.data[0].MC
+                if (needBackup) {
+                  fetch('/api/dict/INITHEADER', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ MC: j.data[0].MC })
+                  })
+                }
+              })
+          } catch (e) { console.warn('HEADER 解析失败', e) }
+        })
+        .catch(function () {})
+    },
+
+    saveHeaderConfig: function () {// 保存表头配置到数据库
+      if (!this.headerTree) return
+      var self = this
+      var updated = applyLabels(JSON.parse(JSON.stringify(self.headerTree)), self.cusLabels)
+      fetch('/api/dict/HEADER', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ MC: JSON.stringify(updated) })
+      })
+        .then(function (r) { return r.json() })
+        .then(function (j) {
+          if (j.success) self.$message.success('表头已保存')
+          else self.$message.error('保存失败')
+        })
+        .catch(function () { self.$message.error('保存失败') })
+    },
+
+
+    // ================================================================
+    //  导出与打印
+    // ================================================================
+
+    getTableData: function () {// 获取表格数据
       var self = this, headers = [], props = []
+      // 维度列
       self.selectedDims.forEach(function (dim) { headers.push(self.getLabel(dim)); props.push(dim) })
+      // 固定列
       FIXED_COLUMNS.forEach(function (gc) { headers.push(self.getLabel(gc.key)); props.push(gc.key) })
+      // 活动列（三层展开为扁平）
       self.visibleCols.forEach(function (group) {
         group.children.forEach(function (child) {
-          if (!child.children) { headers.push(self.getLabel(group.key) + '-' + self.getLabel(child.key)); props.push(child.key) }
-          else { child.children.forEach(function (leaf) { headers.push(self.getLabel(child.key) + '-' + self.getLabel(leaf.key)); props.push(leaf.key) }) }
+          if (!child.children) {
+            // 两层：group-child
+            headers.push(self.getLabel(group.key) + '-' + self.getLabel(child.key))
+            props.push(child.key)
+          } else {
+            // 三层：group-child-leaf
+            child.children.forEach(function (leaf) {
+              headers.push(self.getLabel(child.key) + '-' + self.getLabel(leaf.key))
+              props.push(leaf.key)
+            })
+          }
         })
       })
-      return { headers: headers, rows: self.reportRows.map(function (r) { return props.map(function (p) { return r[p] == null ? '-' : String(r[p]) }) }) }
+      return {
+        headers: headers,
+        rows: self.reportRows.map(function (r) {
+          return props.map(function (p) { return r[p] == null ? '-' : String(r[p]) })
+        })
+      }
     },
-    exportFile: function (format) {
+
+    exportFile: function (format) {// 导出文件
       var data = this.getTableData()
       var name = '统计报表_' + new Date().toLocaleDateString()
       if (format === 'pdf') exportPDF(this.$el, name + '.pdf', this.printSettings.paperSize, this.printSettings.orientation)
       else if (format === 'csv') exportCSV(data.headers, data.rows, name + '.csv')
       else exportWord(data.headers, data.rows, name + '.doc', '统计报表')
     },
-    doPrint: function () {
+
+    doPrint: function () {// 打印
       var ps = this.printSettings, margin = MARGIN_MAP[ps.margin] || '15mm'
       var style = document.createElement('style')
       style.id = 'print-dynamic-style'
       style.textContent = '@page{size:' + ps.paperSize + ' ' + ps.orientation + ';margin:' + margin + '}'
-      var old = document.getElementById('print-dynamic-style'); if (old) old.remove()
+      var old = document.getElementById('print-dynamic-style')
+      if (old) old.remove()
       document.head.appendChild(style)
-      window.onafterprint = function () { var el = document.getElementById('print-dynamic-style'); if (el) el.remove(); window.onafterprint = null }
+      window.onafterprint = function () {
+        var el = document.getElementById('print-dynamic-style')
+        if (el) el.remove()
+        window.onafterprint = null
+      }
       this.$nextTick(function () { window.print() })
     },
 
-    // ---- 智能分析 ----
-    askAI: async function () {
+
+    // ================================================================
+    //  智能分析
+    // ================================================================
+    askAI: async function () {// 提问AI
       if (!this.aiQuestion.trim()) return
       var self = this
-      self.aiLoading = true; self.aiResult = null; self.aiSqlRows = null
+      self.aiLoading = true
+      self.aiResult = null
+      self.aiSqlRows = null
+
       try {
+        // 步骤 1：调用 AI 生成 SQL + 图表配置
         var res1 = await fetch('/api/ask', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question: self.aiQuestion })
         })
-        var json = await res1.json(); self.aiLoading = false
+        var json = await res1.json()
+        self.aiLoading = false
         if (!json.success) { self.$message.error(json.error); return }
         if (!json.data || !json.data.sql) return
         self.aiResult = json.data
+
+        // 步骤 2：执行 AI 生成的 SQL
         var res2 = await fetch('/api/query', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sql: json.data.sql })
         })
         var qRes = await res2.json()
         if (!qRes.success) { self.$message.error('SQL执行失败：' + qRes.error); return }
         self.aiSqlRows = qRes.data
+
+        // 步骤 3：从查询结果构建图表数据
         if (qRes.data && qRes.data.length) {
           var keys = Object.keys(qRes.data[0])
+          // 第一列 → 分类轴（如单位名称、年度）
           var categories = qRes.data.map(function (r) { return String(r[keys[0]] || '未知') })
+          // 第二列 → 数值轴（如员工总数、平均绩效）
           var values = qRes.data.map(function (r) { return r[keys[1]] != null ? r[keys[1]] : 0 })
           var chart = {
-            type: json.data.chart_type || 'bar', title: json.data.title || '统计结果',
+            type: json.data.chart_type || 'pie',
+            title: json.data.title || '统计结果',
             categories: categories,
             series: [{ name: MET_LABELS[keys[1]] || MET_LABELS[keys[1].toLowerCase()] || keys[1], data: values }],
-            dimension: keys[0], metric: keys[1]
+            dimension: keys[0],
+            metric: keys[1]
           }
+          // 步骤 4：渲染图表（$nextTick 确保 #aiChart DOM 已存在）
           self.$nextTick(function () { self.renderAIChart(chart) })
         }
-      } catch (e) { self.aiLoading = false; self.$message.error('请求失败：' + e.message) }
+      } catch (e) {
+        self.aiLoading = false
+        self.$message.error('请求失败：' + e.message)
+      }
     },
-    renderAIChart: function (chart) {
+
+    renderAIChart: function (chart) {// 渲染 AI 图表
       var el = document.getElementById('aiChart')
       if (!el || !chart || !chart.categories || !chart.series) return
       if (this.aiChart) this.aiChart.dispose()
       this.aiChart = echarts.init(el)
-      // 兼容 AI 返回的大小写列名
       var dim = chart.dimension
-      if (this.users.length && !(dim in this.users[0])) dim = dim.toUpperCase()
+      var pseudoRows = this.aiSqlRows.map(function (r) {
+        var keys = Object.keys(r)
+        var row = {}
+        row[dim] = String(r[keys[0]] || '未知')
+        row.RYZS = r[keys[1]] || 0
+        row.JXZF = r[keys[1]] || 0
+        row.HYRS = 0; row.WJHRS = 0; row.YFBRS = 0; row.DCRS = 0
+        return row
+      })
       this.aiChart.setOption(getChartOption(
-      chart.type, chart.categories, chart.series[0].data,
-      this.users, dim, chart.metric, this.locations  // ← 加上 this.locations
-    ), true)
+        chart.type, chart.categories, chart.series[0].data,
+        pseudoRows, dim, chart.metric, [], null
+      ), true)
     },
 
-    // ---- 数据表格 ----
-    mergeSpan: function (param) {
+
+    // ================================================================
+    //  表格工具
+    // ================================================================
+    mergeSpan: function (param) {// 单元格合并
       if (param.columnIndex !== 0) return
       if (!this.selectedDims.length || !this.reportRows.length) return
+
       var firstDim = this.selectedDims[0], rows = this.reportRows
       var val = rows[param.rowIndex][firstDim]
-      if (param.rowIndex > 0 && rows[param.rowIndex - 1][firstDim] === val) return { rowspan: 0, colspan: 0 }
+
+      if (param.rowIndex > 0 && rows[param.rowIndex - 1][firstDim] === val) {
+        return { rowspan: 0, colspan: 0 }
+      }
+
       var count = 1
-      for (var i = param.rowIndex + 1; i < rows.length; i++) { if (rows[i][firstDim] === val) count++; else break }
+      for (var i = param.rowIndex + 1; i < rows.length; i++) {
+        if (rows[i][firstDim] === val) count++
+        else break
+      }
       return { rowspan: count, colspan: 1 }
     },
-    getLabel: function (key) { return this.cusLabels[key] || LABEL_FLAT[key] || key },
-    formatVal: function (val, key) {
+
+    getLabel: function (key) {// 获取标签文本
+      return this.cusLabels[key] || LABEL_FLAT[key] || key
+    },
+
+    formatVal: function (val, key) {// 格式化单元格数值
       if (val == null || val === '') return '-'
       if (key === 'hyl' || key === 'jxpjfl') return val + '%'
       return String(val)
     },
 
-    // ---- 编辑表格 ----
-    startEdit: function (type, key, event) {
+
+    // ================================================================
+    //  表头编辑
+    // ================================================================
+    startEdit: function (type, key, event) {// 开始编辑
       if (!this.isEdit) return
       if (this.editingCell) this.finishEdit()
+
       this.editingCell = { type: type, key: key }
-      this._editBuf = this.getLabel(key)
+      this._editBuf = this.getLabel(key)  // 暂存原始值
+
+      // 计算浮动输入框位置
       var target = event.target.closest('.cell') || event.target
       var cRect = this.$el.querySelector('.table-section').getBoundingClientRect()
       var rect = target.getBoundingClientRect()
       var zoom = parseFloat(window.getComputedStyle(this.$el).zoom) || 1
       this.floatStyle = {
         position: 'absolute', zIndex: 100,
-        left: (rect.left - cRect.left) / zoom + 'px', top: (rect.top - cRect.top) / zoom + 'px',
-        width: Math.max(rect.width, 100) / zoom + 'px', height: Math.max(rect.height, 30) / zoom + 'px'
+        left: (rect.left - cRect.left) / zoom + 'px',
+        top: (rect.top - cRect.top) / zoom + 'px',
+        width: Math.max(rect.width, 100) / zoom + 'px',
+        height: Math.max(rect.height, 30) / zoom + 'px'
       }
+
       var self = this
       this.$nextTick(function () {
-        if (self.$refs.floatInput) { self.$refs.floatInput.value = self._editBuf; self.$refs.floatInput.focus(); self.$refs.floatInput.select() }
+        if (self.$refs.floatInput) {
+          self.$refs.floatInput.value = self._editBuf
+          self.$refs.floatInput.focus()
+          self.$refs.floatInput.select()
+        }
       })
     },
-    finishEdit: function () {
-  if (!this.editingCell) return
-  var val = this.$refs.floatInput.value.trim()
-  var key = this.editingCell.key
-  if (val && val !== this.getLabel(key)) {
-    this.$set(this.cusLabels, key, val)
-    this.saveHeaderConfig()   // ← 新增：自动保存
-  }
-  this.editingCell = null
-  this.floatStyle = {}
-},
-openHeaderSets: function () {
-  var sel = this.selectedCols
-  this.headerChecked = MOV_GROUPS.reduce(function (o, g) {
-    o[g.key] = sel.indexOf(g.key) !== -1
-    return o
-  }, {})
-  this.headerSettingsVis = true
-},
-finishHeaderSets: function () {
-  var selected = [], checked = this.headerChecked
-  Object.keys(checked).forEach(function (k) { if (checked[k]) selected.push(k) })
-  if (!selected.length) { this.$message.warning('请至少选择一个列组'); return }
-  this.selectedCols = selected
-  this.headerSettingsVis = false
-},
-    resetEdit: function () {
-  var self = this
-  self.editingCell = null
-  self.floatStyle = {}
-  // 从 INITHEADER 读取原始配置（如果有的话）
-  fetch('/api/dict/INITHEADER').then(function (r) { return r.json() })
-    .then(function (j) {
-      if (j.success && j.data && j.data.length && j.data[0].MC) {
-        try {
-          var tree = JSON.parse(j.data[0].MC)
-          self.headerTree = tree
-          self.cusLabels = extractLabels(tree)
-          // 同时恢复 HEADER 行
-          fetch('/api/dict/HEADER', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ MC: j.data[0].MC })
-          })
-          self.$message.success('已恢复默认表头')
-        } catch (e) { /* ignore */}
-      } else {
-        // INITHEADER 为空，只清内存
-        self.cusLabels = {}
-        self.$message.info('已清除自定义标签')
+
+    finishEdit: function () {// 完成编辑
+      if (!this.editingCell) return
+      var val = this.$refs.floatInput.value.trim()
+      var key = this.editingCell.key
+      if (val && val !== this.getLabel(key)) {
+        this.$set(this.cusLabels, key, val)
+        this.saveHeaderConfig()  // 自动保存到数据库
       }
-    }).catch(function () { self.cusLabels = {} })
-}
+      this.editingCell = null
+      this.floatStyle = {}
+    },
+
+    openHeaderSets: function () {// 打开弹窗
+      var sel = this.selectedCols
+      this.headerChecked = MOV_GROUPS.reduce(function (o, g) {
+        o[g.key] = sel.indexOf(g.key) !== -1
+        return o
+      }, {})
+      this.headerSettingsVis = true
+    },
+
+    finishHeaderSets: function () {// 完成设置
+      var selected = [], checked = this.headerChecked
+      Object.keys(checked).forEach(function (k) { if (checked[k]) selected.push(k) })
+      if (!selected.length) { this.$message.warning('请至少选择一个列组'); return }
+      this.selectedCols = selected
+      this.headerSettingsVis = false
+    },
+
+    resetEdit: function () {// 重置表头到默认状态 
+      var self = this
+      self.editingCell = null
+      self.floatStyle = {}
+      fetch('/api/dict/INITHEADER')
+        .then(function (r) { return r.json() })
+        .then(function (j) {
+          if (j.success && j.data && j.data.length && j.data[0].MC) {
+            try {
+              var tree = JSON.parse(j.data[0].MC)
+              self.headerTree = tree
+              self.cusLabels = extractLabels(tree)
+              // 同时恢复 HEADER 行到数据库
+              fetch('/api/dict/HEADER', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ MC: j.data[0].MC })
+              })
+              self.$message.success('已恢复默认表头')
+            } catch (e) { /* ignore */ }
+          } else {
+            self.cusLabels = {}
+            self.$message.info('已清除自定义标签')
+          }
+        })
+        .catch(function () { self.cusLabels = {} })
+    }
   }
 }
 </script>

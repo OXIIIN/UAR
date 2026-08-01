@@ -19,9 +19,9 @@ function init(db) {
   )
 
   // ============ 字段说明 ============
-  // SSLX 所属类型（RYLBMC=人员类别枚举 / HEADER=表头JSON / INITHEADER=初始表头 / JXSJ=绩效数据）
-  // MC   名称或值（枚举时为枚举值，HEADER时为JSON字符串，JXSJ时为数值）
-  // NM   关联编码（JXSJ时为组织单元内码）
+  // SSLX 所属类型（RYLBMC=人员类别枚举 / HEADER=表头JSON / INITHEADER=初始表头 / JXMB=绩效数据）
+  // MC   名称或值（枚举时为枚举值，HEADER时为JSON字符串，JXMB时为数值）
+  // NM   关联编码（JXMB时为组织单元内码）
   // XH   序号
 
   // 表头配置 JSON（可动态编辑的多层表头结构）
@@ -35,6 +35,11 @@ function init(db) {
     {"id":"f-dwgs","type":"field","label":"考核单位数","fieldKey":"dwgs","align":"right"},
     {"id":"f-ryzs","type":"field","label":"员工总数","fieldKey":"ryzs","align":"right"},
     {"id":"f-jxzf","type":"field","label":"绩效总分","fieldKey":"jxzf","align":"right"},
+    {"id":"g-jxStats","type":"group","label":"绩效统计","align":"center","children":[
+      {"id":"f-jx_avg","type":"field","label":"平均绩效分","fieldKey":"jx_avg","align":"right"},
+      {"id":"f-jx_min","type":"field","label":"最低绩效分","fieldKey":"jx_min","align":"right"},
+      {"id":"f-jx_max","type":"field","label":"最高绩效分","fieldKey":"jx_max","align":"right"}
+    ]},
     {"id":"g-ryzt","type":"group","label":"人员状态分布","align":"center","children":[
       {"id":"g-hy","type":"group","label":"活跃","align":"center","children":[
         {"id":"f-hyrs","type":"field","label":"人数","fieldKey":"hyrs","align":"right"},
@@ -73,11 +78,11 @@ function init(db) {
     // ---- 初始表头状态 ----
     ['INITHEADER',null,          null,      1],
     // ---- 各单位绩效目标值 ----
-    ['JXSJ',      '75',          '001',     1],
-    ['JXSJ',      '72',          '002',     1],
-    ['JXSJ',      '70',          '003',     1],
-    ['JXSJ',      '73',          '004',     1],
-    ['JXSJ',      '74',          '005',     1]
+    ['JXMB',      '75',          '001',     1],
+    ['JXMB',      '72',          '002',     1],
+    ['JXMB',      '70',          '003',     1],
+    ['JXMB',      '73',          '004',     1],
+    ['JXMB',      '74',          '005',     1]
   ]
 
   rows.forEach(function (r) { stmt.run(r) })

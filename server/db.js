@@ -1,68 +1,79 @@
-// ----导入依赖----
-const initSqlJs = require('sql.js')
-const fs = require('fs')
+// ---- 导入依赖 ----
+var initSqlJs = require('sql.js')   
+var fs = require('fs')             
 
-let db
-const dbPath = './data.db'
+// ---- 模块级变量 ----
+var db = null
+var dbPath = './data.db'           
 
-// ----导入5张表模块----
-const dataTable = require('./table_data')
-const locationTable = require('./table_location')
-const jxBaseTable = require('./table_jx_base')
-const jxMxTable = require('./table_jx_mx')
-const zdTable = require('./table_zd')
+// ---- 导入表模块 ----
+var allTables = [
+  require('./table_data'),       // 主数据表 YYGL_DATA_TABLE
+  require('./table_location'),   // 经纬度表 DW_LOCATION_TABLE
+  require('./table_jx_base'),    // 指标关联表 JX_BASE_TABLE
+  require('./table_jx_mx'),      // 指标明细表 JX_MX_TABLE
+  require('./table_zd')          // 字典表 YYGL_ZD_TABLE
+]
 
-var allTables = [dataTable, locationTable, jxBaseTable, jxMxTable, zdTable]
+// ---- 参数标准化函数 ----
+function normalizeParams(params) {// 将 JS 中的各种"空值"（undefined / null）统一转为 null
+  if (!params) return []
+  return params.map(function (p) { return p == null ? null : p })
+}
 
-// ----初始化数据库----
+// ---- 初始化数据库 ----
 function initDB(callback) {
-  initSqlJs().then(SQL => {
+  return initSqlJs().then(function (SQL) {
     if (fs.existsSync(dbPath)) {
-      const dbData = fs.readFileSync(dbPath)
-      db = new SQL.Database(dbData)
+      var buf = fs.readFileSync(dbPath)
+      db = new SQL.Database(buf)  // sql.js 接受 Uint8Array 或 Buffer
     } else {
       db = new SQL.Database()
     }
-    // 清理旧表（兼容从旧版本迁移）
-    db.run('DROP TABLE IF EXISTS users')
-    // 依次初始化每张表
+    // 依次调用每张表模块的 init 方法
     allTables.forEach(function (t) { t.init(db) })
     saveDB()
-    callback()
+
+  }).catch(function (err) {
+    console.error('数据库初始化失败：', err)
+    throw err
   })
 }
-
-// ----保存数据库到文件----
+// ---- 保存数据库到文件 ----
 function saveDB() {
-  const data = db.export()
-  const dbData = Buffer.from(data)
-  fs.writeFileSync(dbPath, dbData)
+  var data = db.export()
+  var buf = Buffer.from(data)
+  fs.writeFileSync(dbPath, buf)
 }
 
-// ----查询（返回对象数组）----
-function queryAll(sql, params) {
-  const stmt = db.prepare(sql)
-  if (params)
-    stmt.bind(params.map(function (p) {
-      return p == undefined ? null : p
-    }))
-  const rows = []
-  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+// ---- 查询（返回对象数组） ----
+function queryAll(sql, params) {// 返回：[{ id: 123, name: 'xxx' }, ...]
+  if (!db) throw new Error('数据库尚未初始化，请先调用 initDB()')
+  var stmt = db.prepare(sql)
+  if (params) stmt.bind(normalizeParams(params))
+  var rows = []
+  while (stmt.step()) {// step() 逐行遍历结果集，getAsObject() 将当前行转为 { 列名: 值 } 的对象
+    rows.push(stmt.getAsObject())
+  }
   stmt.free()
   return rows
 }
 
-// ----执行（INSERT/UPDATE/DELETE）----
-function run(sql, params) {
-  db.run(sql, params && params.map(function (p) {
-    return p == null ? null : p
-  }))
-  const changes = db.getRowsModified()
-  const lastInsertRowid = /^\s*INSERT/i.test(sql)
+// ---- 执行（INSERT / UPDATE / DELETE） ----
+function run(sql, params) {// 返回：{ lastInsertRowid: 5, changes: 1 }
+  if (!db) throw new Error('数据库尚未初始化，请先调用 initDB()')
+  db.run(sql, normalizeParams(params))
+  var changes = db.getRowsModified()// getRowsModified() 返回本次操作影响的行数
+  // 只有 INSERT 操作需要获取自增主键（last_insert_rowid）
+  // 用正则判断 SQL 语句类型：^\s* 允许前面有空白，/i 忽略大小写
+  var isInsert = /^\s*INSERT/i.test(sql)
+  var lastInsertRowid = isInsert
     ? db.exec('SELECT last_insert_rowid()')[0].values[0][0]
     : null
+
   saveDB()
-  return { lastInsertRowid, changes }
+  return { lastInsertRowid: lastInsertRowid, changes: changes }
 }
 
-module.exports = { initDB, queryAll, run }
+// ---- 导出 ----
+module.exports = { initDB: initDB, queryAll: queryAll, run: run }

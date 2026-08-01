@@ -7,6 +7,7 @@ var ORG_NAMES = [
   '广州分部', '销售部', '演示组', '渠道组'
 ]
 
+var POP_TITLES = { detail: '详情', add: '添加', edit: '编辑' }
 // 用户字段配置（弹窗表单）
 var FIELDS = [
   { key: 'ZZDWNM',   label: '组织编码',     modes: ['detail'] },
@@ -33,8 +34,8 @@ var FIELDS = [
 var DIM_OPTS = [
   { label: '年度', value: 'ND' },
   { label: '单位', value: 'ZZDWMC' },
-  { label: '项目', value: 'XMMC' },
-  { label: '任务', value: 'RWMC' }
+  { label: '任务', value: 'RWMC' },
+  { label: '项目', value: 'XMMC' }
 ]
 
 // 维度钻取链
@@ -47,6 +48,9 @@ var DP_MAP = {
 
 // 不支持维度切换的图表类型
 var DNS = ['wordcloud', 'sankey', 'boxplot', 'nestedpie', 'funnel']
+
+// 不支持钻取的图表类型
+var ND = ['funnel', 'bar', 'line']
 
 // 支持指标切换的图表类型
 var MYS = ['pie', 'rose', 'funnel']
@@ -65,18 +69,37 @@ function getOrgLevel(zzdwnm) {
 // 表格列配置
 var TABLECOLS = [
   { label: '单位名称',   prop: 'ZZDWMC',  width: 120 },
-  { label: '年度',       prop: 'ND',      width: 70 },
-  { label: '管理机构',   prop: 'GLJGMC',  width: 100 },
-  { label: '任务名称',   prop: 'RWMC',    width: 120 },
-  { label: '项目名称',   prop: 'XMMC',    width: 90 },
-  { label: '人员类别',   prop: 'RYLBMC',  width: 80 },
-  { label: '员工总数',   prop: 'RYZS',    width: 80 },
-  { label: '绩效总分',   prop: 'JXZF',    width: 80 },
-  { label: '活跃率',     prop: 'HYL',     width: 80 },
-  { label: '绩效达标率', prop: 'JXPJFL',  width: 90 }
+  { label: '年度',       prop: 'ND',      width: 100 },
+  { label: '管理机构',   prop: 'GLJGMC',  width: 120 },
+  { label: '任务名称',   prop: 'RWMC',    width: 150 },
+  { label: '项目名称',   prop: 'XMMC',    width: 120 },
+  { label: '人员类别',   prop: 'RYLBMC',  width: 100 },
+  { label: '员工总数',   prop: 'RYZS',    width: 100 },
+  { label: '绩效总分',   prop: 'JXZF',    width: 100 },
+  { label: '活跃率',     prop: 'HYL',     width: 100 },
+  { label: '绩效达标率', prop: 'JXPJFL',  width: 120 }
 ]
+// ---- 编码映射 ----
+var ORG_CODE_MAP = {// 弹窗新增/编辑时，用户选择"成都总部"→ 自动填入 ZZDWNM='001'
+  '成都总部':'001','技术部':'001001','产品部':'001002',
+  '前端组':'001001001','后端组':'001001002','运维组':'001001003',
+  '产品组':'001002001','设计组':'001002002',
+  '重庆分部':'002','运营部':'002001','客服部':'002002',
+  '策划组':'002001001','执行组':'002001002',
+  '售前组':'002002001','售后组':'002002002',
+  '绵阳分部':'003','研发部':'003001',
+  '移动组':'003001001','平台组':'003001002',
+  '上海分部':'004','市场部':'004001',
+  '推广组':'004001001','调研组':'004001002',
+  '广州分部':'005','销售部':'005001',
+  '演示组':'005001001','渠道组':'005001002'
+}
+var RW_MAP = { '年度绩效考核':'RWLX001', '专项技能评估':'RWLX002' }
+var XM_MAP = { '项目A':'XM001', '项目B':'XM002', '项目C':'XM003' }
+var GLJG_MAP = { '集团总部':'GLJG001', '战略投资部':'GLJG002', '区域管理部':'GLJG003' }
 
 export {
-  FIELDS, ORG_NAMES, DIM_OPTS, DP_MAP, DNS, MYS,
-  LEVEL_ORDER, getOrgLevel, TABLECOLS
+  FIELDS, ORG_NAMES, POP_TITLES, DIM_OPTS, DP_MAP, DNS, ND, MYS,
+  LEVEL_ORDER, getOrgLevel, TABLECOLS,
+  ORG_CODE_MAP, RW_MAP, XM_MAP, GLJG_MAP    
 }

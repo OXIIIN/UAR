@@ -1,11 +1,17 @@
-// ============ 配色 ============
+// ============ 常量 ============
+// 通用配色板
 var CC = ['#e94560','#4ecb71','#38bdf8','#f0c040','#ff7849','#6c5ce7','#888','#00cec9']
+// 人员状态维度
 var STS = ['活跃', '未激活', '已封禁', '待评估']
-var STS_COLORS = ['#4ecb71', '#888', '#e94560', '#f0c040']
 var STS_FIELDS = ['HYRS', 'WJHRS', 'YFBRS', 'DCRS']
+// 每种状态颜色
+var STS_COLORS = ['#4ecb71', '#888', '#e94560', '#f0c040']
+// 图例样式
 var LEG = { bottom: 0, textStyle: { color: '#999' } }
 
-function getOrgLevel(zzdwnm) {
+
+// ============ 工具函数 ============
+function getOrgLevel(zzdwnm) {// 根据组织单元内码（ZZDWNM）判断组织层级(用于漏斗图)
   if (!zzdwnm) return '未知'
   var len = String(zzdwnm).length
   if (len <= 3) return '一级单位'
@@ -18,31 +24,50 @@ function dimVal(r, dim) {
   return r[dim]
 }
 
-function cntStatus(rows, dim, cats, statusIdx) {
+
+function topOrAll(rows) {// 筛选顶级单位行
+  var top = rows.filter(function (r) { return r.ZZDWNM && String(r.ZZDWNM).length <= 3 })
+  return top.length > 0 ? top : rows
+}
+
+function groupByDim(rows, dim) {// 按维度预分组数据行
+  var groups = {}
+  rows.forEach(function (r) {
+    var key = String(dimVal(r, dim) || '未知')
+    if (!groups[key]) groups[key] = []
+    groups[key].push(r)
+  })
+  return groups
+}
+
+function cntStatus(rows, dim, cats, statusIdx) {// 按维度分类统计各人员状态的数量（用于堆积柱状图、多系列折线图等）；// 示例：cntStatus(rows, 'ZZDWMC', ['成都总部','重庆分部'], 0) → 返回 [成都总部的活跃人数, 重庆分部的活跃人数]
   var field = STS_FIELDS[statusIdx]
+  var groups = groupByDim(rows, dim)  
   return cats.map(function (cat) {
-    return rows.filter(function (r) { return dimVal(r, dim) === cat })
-      .reduce(function (s, r) { return s + Number(r[field] || 0) }, 0)
+    var grp = groups[cat] || []
+    return grp.reduce(function (s, r) { return s + Number(r[field] || 0) }, 0)
   })
 }
 
-function avgD(cats, rows, dim, metric) {
+function avgD(cats, rows, dim, metric) {// 按维度计算平均指标（人均绩效 或 活跃率）（供饼图、KPI、组合图等使用）；返回 [{ name: 维度值, value: 计算结果 }] 格式
+  var groups = groupByDim(rows, dim)  // 预分组一次
   return cats.map(function (cat) {
-    var grp = rows.filter(function (r) { return dimVal(r, dim) === cat })
+    var grp = groups[cat] || []
     var totalRyzs = grp.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0)
     if (totalRyzs === 0) return { name: cat, value: 0 }
-    if (metric === 'avg_attendance' || metric === 'hyl') {
+    if (metric === 'avg_attendance' || metric === 'hyl') {// 活跃率模式：活跃人数 / 总人数 × 100
       var totalHyrs = grp.reduce(function (a, r) { return a + Number(r.HYRS || 0) }, 0)
       return { name: cat, value: +(totalHyrs / totalRyzs * 100).toFixed(1) }
     }
+    // 默认/人均绩效模式：绩效总分 / 总人数
     var totalJxzf = grp.reduce(function (a, r) { return a + Number(r.JXZF || 0) }, 0)
     return { name: cat, value: +(totalJxzf / totalRyzs).toFixed(1) }
   })
 }
 
-// ============ 图表配置 ============
 
-function stdOpt(cats, S, withLegend, trigger) {
+// ============ 图表配置 ============
+function stdOpt(cats, S, withLegend, trigger) {// 标准图表配置模板
   var o = {
     tooltip: { trigger: trigger || 'axis' },
     grid: { left: 60, right: 20, bottom: 40, top: 20 },
@@ -53,19 +78,24 @@ function stdOpt(cats, S, withLegend, trigger) {
   if (withLegend) o.legend = LEG
   return o
 }
-
-// KPI 指标卡
+// ---- KPI 指标卡 ----
 function kpiOpt(cats, vals, rows, dim) {
   var data = avgD(cats, rows, dim)
   var total = data.reduce(function (a, d) { return a + d.value }, 0)
-  return { cards: data.map(function (d) {
-    return { name: d.name, value: d.value, pct: total ? (d.value / total * 100).toFixed(1) + '%' : '-' }
-  })}
+  return {
+    cards: data.map(function (d) {
+      return {
+        name: d.name,
+        value: d.value,
+        pct: total ? (d.value / total * 100).toFixed(1) + '%' : '-'
+      }
+    })
+  }
 }
 
-// ---- 热力区域图（从数据库 DW_LOCATION_TABLE 读取坐标，只显示顶级单位） ----
+
+// ---- 热力区域图 ----
 function heatmapOpt(rows, dim, locations) {
-  // 1. 从 location 数据构建坐标查找表（DMNM → [经度, 纬度]）
   var locMap = {}
   if (locations && locations.length) {
     locations.forEach(function (loc) {
@@ -73,20 +103,20 @@ function heatmapOpt(rows, dim, locations) {
     })
   }
 
-  // 2. 只取顶级单位行（ZZDWNM 长度 <= 3），按单位聚合员工数
   var orgData = {}
   rows.forEach(function (r) {
+    // 只取顶级单位（内码长度 ≤ 3，如 001、002、003）
     if (!r.ZZDWNM || String(r.ZZDWNM).length > 3) return
     var org = r.ZZDWMC
     if (!org || !locMap[org]) return
     if (!orgData[org]) orgData[org] = { total: 0, dimMap: {} }
     var ryzs = Number(r.RYZS || 0)
     orgData[org].total += ryzs
+    // 按当前分析维度细分（如按人员类别：普通/骨干/核心各多少人）
     var dv = dimVal(r, dim) || '未知'
     orgData[org].dimMap[dv] = (orgData[org].dimMap[dv] || 0) + ryzs
   })
 
-  // 3. 转为 ECharts 散点格式
   var data = Object.keys(orgData).map(function (org) {
     return { name: org, value: [locMap[org][0], locMap[org][1], orgData[org].total] }
   })
@@ -97,7 +127,9 @@ function heatmapOpt(rows, dim, locations) {
       formatter: function (p) {
         var d = orgData[p.data && p.data.name]
         if (!d) return ''
-        var lines = Object.keys(d.dimMap).map(function (k) { return k + ': ' + d.dimMap[k] + '人' })
+        var lines = Object.keys(d.dimMap).map(function (k) {
+          return k + ': ' + d.dimMap[k] + '人'
+        })
         return p.data.name + '（' + d.total + '人）<br/>' + lines.join('<br/>')
       }
     },
@@ -106,154 +138,253 @@ function heatmapOpt(rows, dim, locations) {
       max: data.length ? Math.max.apply(null, data.map(function (d) { return d.value[2] })) : 1,
       inRange: { color: ['#33b8cc', '#66ccb8', '#ff4f38', '#e62828'] }
     },
-    geo: {
+    geo: {// 中国地图底图
       map: 'china', center: [104, 36], zoom: 1.5, aspectScale: 0.75,
       layoutCenter: ['50%', '50%'], layoutSize: '100%',
       itemStyle: { areaColor: '#0d1b2e', borderColor: '#1a3a5c', borderWidth: 1 },
-      emphasis: { label: { show: true, color: '#e2e2e2', fontSize: 11 }, itemStyle: { areaColor: '#1a2745' } }
+      emphasis: {
+        label: { show: true, color: '#e2e2e2', fontSize: 11 },
+        itemStyle: { areaColor: '#1a2745' }
+      }
     },
     series: [
       { type: 'heatmap', coordinateSystem: 'geo', data: data, pointSize: 20, blurSize: 34 },
       { type: 'scatter', coordinateSystem: 'geo', data: data, symbolSize: 12,
-        label: { show: true, formatter: function (p) { return p.data.name }, position: 'right', color: '#e2e2e2', fontSize: 10 },
-        itemStyle: { color: '#e94560', borderColor: 'rgba(255,255,255,0.3)', borderWidth: 2 } }
+        label: {
+          show: true,
+          formatter: function (p) { return p.data.name },
+          position: 'right', color: '#e2e2e2', fontSize: 10
+        },
+        itemStyle: { color: '#e94560', borderColor: 'rgba(255,255,255,0.3)', borderWidth: 2 }
+      }
     ]
   }
 }
 
+
 // ---- 柱状图 ----
 function barOpt(type, cats, vals, rows, dim) {
   var S = []
-  if (type === 'bar') {
+
+  if (type === 'bar') {// 分区柱状图
     var dimColors = ['#38bdf8','#f0c040','#e94560','#4ecb71','#6c5ce7','#ff7849','#00cec9','#888']
+    var groups = groupByDim(rows, dim)  // 预分组
     S = cats.map(function (cat, i) {
+      var grp = groups[cat] || []
       return {
         name: cat, type: 'bar',
-        data: STS.map(function (s, si) {
-          return rows.filter(function (r) { return dimVal(r, dim) === cat })
-            .reduce(function (sum, r) { return sum + Number(r[STS_FIELDS[si]] || 0) }, 0)
+        data: STS_FIELDS.map(function (field) {
+          return grp.reduce(function (sum, r) { return sum + Number(r[field] || 0) }, 0)
         }),
-        itemStyle: { color: dimColors[i % dimColors.length] }, barWidth: '15%'
+        itemStyle: { color: dimColors[i % dimColors.length] },
+        barWidth: '15%'
       }
     })
     return stdOpt(STS, S, true, 'axis')
   }
-  if (type === 'stacked' || type === 'multibar') {
+
+  if (type === 'stacked' || type === 'multibar') {// 堆积/多系列柱状图
     S = STS.map(function (s, i) {
-      var r = { name: s, type: 'bar', data: cntStatus(rows, dim, cats, i), itemStyle: { color: STS_COLORS[i] } }
-      if (type === 'stacked') r.stack = 't'
+      var r = {
+        name: s, type: 'bar',
+        data: cntStatus(rows, dim, cats, i),
+        itemStyle: { color: STS_COLORS[i] }
+      }
+      if (type === 'stacked') r.stack = 't'  // 同一 stack 值的 series 堆叠
       return r
     })
   }
-  if (type === 'contrast') {
+
+  if (type === 'contrast') {// 对比柱状图
     var totalRyzs = rows.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0)
     var totalJxzf = rows.reduce(function (a, r) { return a + Number(r.JXZF || 0) }, 0)
     var avg = totalRyzs > 0 ? +(totalJxzf / totalRyzs).toFixed(1) : 0
-    S = [{ name: '偏离均值', type: 'bar',
+    S = [{
+      name: '偏离均值', type: 'bar',
       data: avgD(cats, rows, dim).map(function (d) {
         var v = +(d.value - avg).toFixed(1)
-        return { name: d.name, value: v, itemStyle: { color: v >= 0 ? '#4ecb71' : '#e94560' } }
+        return {
+          name: d.name, value: v,
+          itemStyle: { color: v >= 0 ? '#4ecb71' : '#e94560' }  
+        }
       }),
-      label: { show: true, position: 'top', color: '#e2e2e2', formatter: function (p) { return (p.value >= 0 ? '+' : '') + p.value } }
+      label: {
+        show: true, position: 'top', color: '#e2e2e2',
+        formatter: function (p) { return (p.value >= 0 ? '+' : '') + p.value }
+      }
     }]
   }
+
   return stdOpt(cats, S, type !== 'bar', 'axis')
 }
 
+
+// ---- 瀑布图 ----
 function waterfallOpt(cats, vals) {
   var sum = vals.reduce(function (a, b) { return a + b }, 0)
-  var newcats = ['合计'].concat(cats), bv = [sum].concat(vals)
+  var newcats = ['合计'].concat(cats)
+  var bv = [sum].concat(vals)
+
   var cum = [0], rem = sum
-  for (var i = 1; i < bv.length; i++) { rem -= bv[i]; cum.push(rem) }
+  for (var i = 1; i < bv.length; i++) {
+    rem -= bv[i]
+    cum.push(rem)
+  }
+
   return stdOpt(newcats, [
-    { type: 'bar', stack: 'w', data: cum, itemStyle: { color: 'transparent' }, emphasis: { itemStyle: { color: 'transparent' } } },
-    { type: 'bar', stack: 'w', data: bv, itemStyle: { color: '#38bdf8' }, label: { show: true, position: 'inside', color: '#e2e2e2' } }
+    { type: 'bar', stack: 'w', data: cum,
+      itemStyle: { color: 'transparent' },
+      emphasis: { itemStyle: { color: 'transparent' } } },
+    { type: 'bar', stack: 'w', data: bv,
+      itemStyle: { color: '#38bdf8' },
+      label: { show: true, position: 'inside', color: '#e2e2e2' } }
   ])
 }
 
-function comboOpt(cats, vals, rows, dim) {
+
+// ---- 组合图 ----
+function comboOpt(cats, vals, rows, dim, targets) {
   var avgs = avgD(cats, rows, dim).map(function (d) { return d.value })
+
+  var series = [
+    { name: '员工数', type: 'bar', data: vals,
+      itemStyle: { color: '#38bdf8' }, barWidth: '40%' },
+    { name: '人均绩效', type: 'line', yAxisIndex: 1, data: avgs, smooth: true,
+      itemStyle: { color: '#e94560' }, lineStyle: { color: '#e94560', width: 2 } }
+  ]
+
+  if (targets && targets.length) {
+    series.push({
+      name: '绩效目标', type: 'line', yAxisIndex: 1, data: targets,
+      lineStyle: { type: 'dashed', color: '#f0c040', width: 2 },
+      itemStyle: { color: '#f0c040' }, symbol: 'circle', symbolSize: 6
+    })
+  }
+
   return {
     tooltip: { trigger: 'axis' }, legend: LEG,
     grid: { left: 60, right: 60, bottom: 40, top: 40 },
     xAxis: { type: 'category', data: cats, axisLabel: { color: '#999' } },
     yAxis: [
-      { type: 'value', name: '员工数', axisLabel: { color: '#999' }, splitLine: { lineStyle: { color: '#2a2a4a' } } },
-      { type: 'value', name: '人均绩效', axisLabel: { color: '#999' }, splitLine: { show: false } }
+      { type: 'value', name: '员工数', axisLabel: { color: '#999' },
+        splitLine: { lineStyle: { color: '#2a2a4a' } } },
+      { type: 'value', name: '人均绩效', axisLabel: { color: '#999' },
+        splitLine: { show: false } }
     ],
-    series: [
-      { name: '员工数', type: 'bar', data: vals, itemStyle: { color: '#38bdf8' }, barWidth: '40%' },
-      { name: '人均绩效', type: 'line', yAxisIndex: 1, data: avgs, smooth: true, itemStyle: { color: '#e94560' }, lineStyle: { color: '#e94560', width: 2 } }
-    ]
+    series: series
   }
 }
+
 
 // ---- 折线图 ----
 function lineOpt(type, cats, vals, rows, dim) {
   var S = []
-  if (type === 'line') {
+
+  if (type === 'line') {  // 分区折线图
+    var groups = groupByDim(rows, dim)  // 预分组一次
     S = cats.map(function (cat, i) {
+      var grp = groups[cat] || []
       return {
         name: cat, type: 'line', smooth: true,
-        data: STS.map(function (s, si) {
-          return rows.filter(function (r) { return dimVal(r, dim) === cat })
-            .reduce(function (sum, r) { return sum + Number(r[STS_FIELDS[si]] || 0) }, 0)
+        data: STS_FIELDS.map(function (field) {
+          return grp.reduce(function (sum, r) { return sum + Number(r[field] || 0) }, 0)
         }),
-        lineStyle: { color: CC[i % CC.length] }, itemStyle: { color: CC[i % CC.length] },
+        lineStyle: { color: CC[i % CC.length] },
+        itemStyle: { color: CC[i % CC.length] },
         areaStyle: { color: 'rgba(56,189,248,0.1)' }
       }
     })
     return stdOpt(STS, S, true, 'axis')
   }
-  if (type === 'multiline') {
+
+  if (type === 'multiline') {// 多系列折线图
     S = STS.map(function (s, i) {
-      return { name: s, type: 'line', smooth: true, data: cntStatus(rows, dim, cats, i),
-        lineStyle: { color: STS_COLORS[i] }, itemStyle: { color: STS_COLORS[i] } }
+      return {
+        name: s, type: 'line', smooth: true,
+        data: cntStatus(rows, dim, cats, i),
+        lineStyle: { color: STS_COLORS[i] },
+        itemStyle: { color: STS_COLORS[i] }
+      }
     })
   }
-  if (type === 'rangearea') {
-    var areaAlpha = ['rgba(78,203,113,0.2)', 'rgba(136,136,136,0.2)', 'rgba(233,69,96,0.2)', 'rgba(240,192,64,0.2)']
+
+  if (type === 'rangearea') { // 范围面积图
+    var areaAlpha = [
+      'rgba(78,203,113,0.2)', 'rgba(136,136,136,0.2)',
+      'rgba(233,69,96,0.2)', 'rgba(240,192,64,0.2)'
+    ]
     S = STS.map(function (s, i) {
-      return { name: s, type: 'line', smooth: true, data: cntStatus(rows, dim, cats, i),
-        lineStyle: { color: STS_COLORS[i], width: 2 }, itemStyle: { color: STS_COLORS[i] },
-        areaStyle: { color: areaAlpha[i] } }
+      return {
+        name: s, type: 'line', smooth: true,
+        data: cntStatus(rows, dim, cats, i),
+        lineStyle: { color: STS_COLORS[i], width: 2 },
+        itemStyle: { color: STS_COLORS[i] },
+        areaStyle: { color: areaAlpha[i] }
+      }
     })
-    S.push({ name: '合计', type: 'line', smooth: true, data: vals,
-      lineStyle: { color: '#f0c040', width: 3 }, itemStyle: { color: '#f0c040' },
-      areaStyle: { color: 'rgba(240,192,64,0.15)' } })
+    S.push({
+      name: '合计', type: 'line', smooth: true, data: vals,
+      lineStyle: { color: '#f0c040', width: 3 },
+      itemStyle: { color: '#f0c040' },
+      areaStyle: { color: 'rgba(240,192,64,0.15)' }
+    })
   }
+
   return stdOpt(cats, S, type !== 'line')
 }
 
+
+// ---- 雷达图 ----
 function radarOpt(cats, vals, rows, dim) {
+  var groups = groupByDim(rows, dim)  // 预分组一次
+
   var catMetrics = cats.map(function (cat) {
-    var grp = rows.filter(function (r) { return dimVal(r, dim) === cat })
-    var n = grp.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0) || 1
+    var grp = groups[cat] || []
+    var totalRyzs = grp.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0)
+    var safeRyzs = totalRyzs || 1  // 除零保护
     return {
-      count: grp.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0),
-      avgScore: +(grp.reduce(function (a, r) { return a + Number(r.JXZF || 0) }, 0) / n).toFixed(1),
-      avgHyl: +(grp.reduce(function (a, r) { return a + Number(r.HYRS || 0) }, 0) / n * 100).toFixed(1)
+      count: totalRyzs,
+      // 人均绩效 = 绩效总分 / 员工总数
+      avgScore: +(grp.reduce(function (a, r) { return a + Number(r.JXZF || 0) }, 0) / safeRyzs).toFixed(1),
+      // 活跃率 = 活跃人数 / 员工总数 × 100
+      avgHyl: +(grp.reduce(function (a, r) { return a + Number(r.HYRS || 0) }, 0) / safeRyzs * 100).toFixed(1)
     }
   })
+
   var maxCount = Math.max.apply(null, catMetrics.map(function (m) { return m.count }).concat([1]))
   var indicator = cats.map(function (c) { return { name: c, max: 100 } })
+
   var seriesData = [
-    { name: '员工占比', value: catMetrics.map(function (m) { return +(m.count / maxCount * 100).toFixed(1) }),
-      lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 } },
-    { name: '人均绩效', value: catMetrics.map(function (m) { return m.avgScore }),
-      lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 } },
-    { name: '活跃率', value: catMetrics.map(function (m) { return m.avgHyl }),
-      lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 } }
+    {
+      name: '员工占比',
+      value: catMetrics.map(function (m) { return +(m.count / maxCount * 100).toFixed(1) }),
+      lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
+    },
+    {
+      name: '人均绩效',
+      value: catMetrics.map(function (m) { return m.avgScore }),
+      lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
+    },
+    {
+      name: '活跃率',
+      value: catMetrics.map(function (m) { return m.avgHyl }),
+      lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
+    }
   ]
+
   return {
     tooltip: { trigger: 'item' }, legend: LEG,
-    radar: { indicator: indicator, shape: 'polygon',
+    radar: {
+      indicator: indicator, shape: 'polygon',
       splitArea: { areaStyle: { color: ['#16213e', '#1a2745'] } },
       splitLine: { lineStyle: { color: '#2a2a4a' } },
-      axisName: { color: '#999' }, axisLine: { lineStyle: { color: '#2a2a4a' } } },
+      axisName: { color: '#999' },
+      axisLine: { lineStyle: { color: '#2a2a4a' } }
+    },
     series: [{ type: 'radar', data: seriesData }]
   }
 }
+
 
 // ---- 散点图 ----
 function scatterOpt(type, cats, vals, rows, dim) {
@@ -261,36 +392,54 @@ function scatterOpt(type, cats, vals, rows, dim) {
   var data = isB
     ? avgD(cats, rows, dim).map(function (d, i) { return [i + 1, vals[i], d.value, d.name] })
     : cats.map(function (c, i) { return [i + 1, vals[i]] })
+
   return {
-    tooltip: { formatter: function (p) {
-      return isB ? p.data[3] + '<br/>员工数: ' + p.data[1] + '<br/>人均绩效: ' + p.data[2]
-        : cats[p.data[0] - 1] + '<br/>员工数: ' + p.data[1]
-    }},
+    tooltip: {
+      formatter: function (p) {
+        return isB
+          ? p.data[3] + '<br/>员工数: ' + p.data[1] + '<br/>人均绩效: ' + p.data[2]
+          : cats[p.data[0] - 1] + '<br/>员工数: ' + p.data[1]
+      }
+    },
     grid: { left: 60, right: 20, bottom: 40, top: 40 },
-    xAxis: { type: 'value', min: 0, max: cats.length + 1, interval: 1,
+    xAxis: {
+      type: 'value', min: 0, max: cats.length + 1, interval: 1,
       axisLabel: { color: '#999', formatter: function (x) { return cats[x - 1] || '' } },
-      splitLine: { lineStyle: { color: '#2a2a4a' } } },
-    yAxis: { type: 'value', axisLabel: { color: '#999' }, splitLine: { lineStyle: { color: '#2a2a4a' } } },
-    series: [{ type: 'scatter', data: data,
+      splitLine: { lineStyle: { color: '#2a2a4a' } }
+    },
+    yAxis: {
+      type: 'value', axisLabel: { color: '#999' },
+      splitLine: { lineStyle: { color: '#2a2a4a' } }
+    },
+    series: [{
+      type: 'scatter', data: data,
+      // bubble 模式：气泡大小 = 人均绩效（最小 20px）
       symbolSize: isB ? function (p) { return Math.max(p[2], 20) } : 20,
-      itemStyle: { color: '#38bdf8', borderColor: 'transparent', borderWidth: 0 } }]
+      itemStyle: { color: '#38bdf8', borderColor: 'transparent', borderWidth: 0 }
+    }]
   }
 }
+
 
 // ---- 饼图 ----
 function pieOpt(type, cats, vals, rows, dim, metric) {
   var useAvg = metric === 'avg' || metric === 'avg_attendance' || metric === 'hyl'
-  var d = useAvg ? avgD(cats, rows, dim, metric) : cats.map(function (x, i) {
-    return { name: x, value: vals[i], itemStyle: { color: CC[i % CC.length] } }
-  })
+  var d = useAvg
+    ? avgD(cats, rows, dim, metric)
+    : cats.map(function (x, i) {
+        return { name: x, value: vals[i], itemStyle: { color: CC[i % CC.length] } }
+      })
+
   var S = []
-  if (type === 'pie') {
+
+  if (type === 'pie') {// 饼图
     S = [{ type: 'pie', radius: ['40%', '70%'], data: d, label: { color: '#e2e2e2' } }]
-  } else if (type === 'rose') {
+  } else if (type === 'rose') {// 玫瑰图
     S = [{ type: 'pie', radius: ['20%', '70%'], roseType: 'area', data: d, label: { color: '#e2e2e2' } }]
-  } else if (type === 'nestedpie') {
+  } else if (type === 'nestedpie') {// 多层饼图
+    var filtered = topOrAll(rows)
     var ds = {}
-    rows.forEach(function (r) {
+    filtered.forEach(function (r) {
       var k = dimVal(r, dim) || '未知'
       if (!ds[k]) ds[k] = { hy: 0, wjh: 0, yfb: 0, dcp: 0 }
       ds[k].hy  += Number(r.HYRS  || 0)
@@ -298,9 +447,11 @@ function pieOpt(type, cats, vals, rows, dim, metric) {
       ds[k].yfb += Number(r.YFBRS || 0)
       ds[k].dcp += Number(r.DCRS  || 0)
     })
+    // 内环数据：每个维度的总人数
     var inn = Object.keys(ds).map(function (k) {
       return { name: k, value: ds[k].hy + ds[k].wjh + ds[k].yfb + ds[k].dcp }
     })
+    // 外环数据：每个维度 × 每种状态
     var out = [], sk = ['hy','wjh','yfb','dcp']
     Object.keys(ds).forEach(function (k) {
       sk.forEach(function (s, si) {
@@ -312,20 +463,28 @@ function pieOpt(type, cats, vals, rows, dim, metric) {
       { type: 'pie', radius: ['50%', '70%'], data: out, label: { color: '#e2e2e2' } }
     ]
   }
+
   var opt = { tooltip: { trigger: 'item' }, series: S }
   if (type !== 'nestedpie') opt.legend = LEG
   return opt
 }
 
+// ---- 矩形树图 ----
 function treemapOpt(cats, vals) {
-  return { tooltip: {}, series: [{
-    type: 'treemap', label: { color: '#111010', fontSize: 15 },
-    data: cats.map(function (c, i) { return { name: c, value: vals[i] } }),
-    levels: [{ itemStyle: { borderColor: '#16213e', borderWidth: 3, gapWidth: 3 } }],
-    breadcrumb: { show: false }
-  }]}
+  return {
+    tooltip: {},
+    series: [{
+      type: 'treemap',
+      label: { color: '#111010', fontSize: 15 },
+      data: cats.map(function (c, i) { return { name: c, value: vals[i] } }),
+      levels: [{ itemStyle: { borderColor: '#16213e', borderWidth: 3, gapWidth: 3 } }],
+      breadcrumb: { show: false }
+    }]
+  }
 }
 
+
+// ---- 词云图 ----
 function wordcloudOpt(rows) {
   var wm = {}
   rows.forEach(function (r) {
@@ -335,46 +494,66 @@ function wordcloudOpt(rows) {
     if (r.RWMC)    wm[r.RWMC]    = (wm[r.RWMC]    || 0) + n
     if (r.XMMC)    wm[r.XMMC]    = (wm[r.XMMC]    || 0) + n
   })
-  return { series: [{
-    type: 'wordCloud', shape: 'circle', sizeRange: [14, 60], rotationRange: [-30, 30],
-    gridSize: 8, width: '90%', height: '80%',
-    textStyle: { fontFamily: 'Microsoft YaHei', fontWeight: 'bold',
-      color: function () { return 'rgb(' + Math.round(Math.random()*150+100) + ',' + Math.round(Math.random()*150+100) + ',' + Math.round(Math.random()*200+55) + ')' }
-    },
-    data: Object.keys(wm).map(function (n) { return { name: n, value: wm[n] } })
-  }]}
+  return {
+    series: [{
+      type: 'wordCloud', shape: 'circle',
+      sizeRange: [14, 60],       // 字号范围
+      rotationRange: [-30, 30],  // 旋转角度范围
+      gridSize: 8, width: '90%', height: '80%',
+      textStyle: {
+        fontFamily: 'Microsoft YaHei', fontWeight: 'bold',
+        color: function () {// 随机生成柔和的亮色（每组 RGB 都在 100~255 范围内）
+          return 'rgb(' +
+            Math.round(Math.random() * 150 + 100) + ',' +
+            Math.round(Math.random() * 150 + 100) + ',' +
+            Math.round(Math.random() * 200 + 55) + ')'
+        }
+      },
+      data: Object.keys(wm).map(function (n) { return { name: n, value: wm[n] } })
+    }]
+  }
 }
 
-function funnelOpt(cats, vals, rows, dim, metric) {
-  var d
-  if (metric === 'rylb' || metric === 'edu') {
-    var lbOrder = ['核心', '骨干', '普通'], lbMap = {}
-    rows.forEach(function (r) { var lb = r.RYLBMC || '未知'; lbMap[lb] = (lbMap[lb] || 0) + Number(r.RYZS || 0) })
-    var cum = 0
-    d = lbOrder.map(function (lb) { cum += (lbMap[lb] || 0); return { name: lb + '及以上', value: cum } })
-  } else {
-    var thresholds = [
-      { label: '≥0分(已评估)', min: 0 }, { label: '≥60分(合格)', min: 60 },
-      { label: '≥80分(良好)', min: 80 },  { label: '≥90分(优秀)', min: 90 }
-    ]
-    d = thresholds.map(function (t) {
-      return { name: t.label, value: rows.filter(function (r) {
+
+// ---- 漏斗图 ----
+function funnelOpt(cats, vals, rows) {
+  var filtered = topOrAll(rows)
+  var thresholds = [
+    { label: '≥0分(已评估)', min: 0 },
+    { label: '≥60分(合格)',  min: 60 },
+    { label: '≥80分(良好)',  min: 80 },
+    { label: '≥90分(优秀)',  min: 90 }
+  ]
+  var d = thresholds.map(function (t) {
+    return {
+      name: t.label,
+      value: filtered.filter(function (r) {
         var ryzs = Number(r.RYZS || 0)
         return ryzs > 0 && (Number(r.JXZF || 0) / ryzs) >= t.min
-      }).reduce(function (sum, r) { return sum + Number(r.RYZS || 0) }, 0) }
-    })
+      }).reduce(function (sum, r) { return sum + Number(r.RYZS || 0) }, 0)
+    }
+  })
+
+  return {
+    tooltip: { trigger: 'item' }, legend: LEG,
+    series: [{
+      type: 'funnel',
+      left: '10%', top: 60, bottom: 60, width: '80%',
+      sort: 'descending', gap: 2, data: d,
+      label: { color: '#e2e2e2' },
+      itemStyle: { borderColor: '#1a1a2e', borderWidth: 2 }
+    }]
   }
-  return { tooltip: { trigger: 'item' }, legend: LEG, series: [{
-    type: 'funnel', left: '10%', top: 60, bottom: 60, width: '80%',
-    sort: 'descending', gap: 2, data: d,
-    label: { color: '#e2e2e2' }, itemStyle: { borderColor: '#1a1a2e', borderWidth: 2 }
-  }]}
 }
 
+// ---- 桑基图 ----
 function sankeyOpt(rows) {
+  var filtered = topOrAll(rows)
   var ns = [], nsS = {}, lm = {}
-  rows.forEach(function (r) {
-    var a = r.GLJGMC || '未知机构', b = r.ZZDWMC || '未知单位', c = r.RYLBMC || '未知类别'
+  filtered.forEach(function (r) {
+    var a = r.GLJGMC || '未知机构'
+    var b = r.ZZDWMC || '未知单位'
+    var c = r.RYLBMC || '未知类别'
     var n = Number(r.RYZS || 0)
     if (!nsS[a]) { ns.push(a); nsS[a] = 1 }
     if (!nsS[b]) { ns.push(b); nsS[b] = 1 }
@@ -382,28 +561,49 @@ function sankeyOpt(rows) {
     var k1 = a + '->' + b; lm[k1] = (lm[k1] || 0) + n
     var k2 = b + '->' + c; lm[k2] = (lm[k2] || 0) + n
   })
-  return { tooltip: { trigger: 'item' }, series: [{
-    type: 'sankey', left: '10%', right: '10%',
-    data: ns.map(function (n) { return { name: n } }),
-    links: Object.keys(lm).map(function (k) { var p = k.split('->'); return { source: p[0], target: p[1], value: lm[k] } }),
-    emphasis: { focus: 'adjacency' }, lineStyle: { color: 'gradient', curveness: 0.5 }, label: { color: '#e2e2e2' }
-  }]}
+
+  return {
+    tooltip: { trigger: 'item' },
+    series: [{
+      type: 'sankey', left: '10%', right: '10%',
+      data: ns.map(function (n) { return { name: n } }),
+      links: Object.keys(lm).map(function (k) {
+        var p = k.split('->')
+        return { source: p[0], target: p[1], value: lm[k] }
+      }),
+      emphasis: { focus: 'adjacency' },
+      lineStyle: { color: 'gradient', curveness: 0.5 },
+      label: { color: '#e2e2e2' }
+    }]
+  }
 }
 
+
+// ---- 箱型图 ----
 function boxplotOpt(rows, dim) {
+  var filtered = topOrAll(rows)
   var bg = {}
-  rows.forEach(function (r) {
+  filtered.forEach(function (r) {
     var k = dimVal(r, dim) || '未知'
     if (!bg[k]) bg[k] = []
     var ryzs = Number(r.RYZS || 0)
     if (ryzs > 0) bg[k].push(+(Number(r.JXZF || 0) / ryzs).toFixed(1))
   })
+
   var bc = Object.keys(bg)
+  // 计算五数概括：最小值、Q1、中位数、Q3、最大值
   var bd = bc.map(function (d) {
     var a = bg[d].slice().sort(function (x, y) { return x - y }), n = a.length
     if (!n) return [0, 0, 0, 0, 0]
-    return [a[0], a[Math.floor(n*0.25)], a[Math.floor(n*0.5)], a[Math.floor(n*0.75)], a[n-1]]
+    return [
+      a[0],
+      a[Math.floor(n * 0.25)],
+      a[Math.floor(n * 0.5)],
+      a[Math.floor(n * 0.75)],
+      a[n - 1]
+    ]
   })
+
   return stdOpt(bc, [{
     type: 'boxplot', data: bd,
     label: { show: true, color: '#e2e2e2' },
@@ -412,14 +612,14 @@ function boxplotOpt(rows, dim) {
   }], false, 'item')
 }
 
+
 // ============ 统一分发器 ============
-// locations: 从 DW_LOCATION_TABLE 查询的坐标数据（供热力图使用）
-function getChartOption(type, cats, vals, rows, dim, metric, locations) {
+function getChartOption(type, cats, vals, rows, dim, metric, locations, targets) {
   if (type === 'kpi') return kpiOpt(cats, vals, rows, dim)
   if (type === 'heatmap') return heatmapOpt(rows, dim, locations)
   if (['bar','stacked','multibar','contrast'].indexOf(type) !== -1) return barOpt(type, cats, vals, rows, dim)
   if (type === 'waterfall') return waterfallOpt(cats, vals)
-  if (type === 'combo') return comboOpt(cats, vals, rows, dim)
+  if (type === 'combo') return comboOpt(cats, vals, rows, dim, targets)
   if (['line','multiline','rangearea'].indexOf(type) !== -1) return lineOpt(type, cats, vals, rows, dim)
   if (type === 'lineradar') return radarOpt(cats, vals, rows, dim)
   if (['scatter','bubble'].indexOf(type) !== -1) return scatterOpt(type, cats, vals, rows, dim)
@@ -432,24 +632,42 @@ function getChartOption(type, cats, vals, rows, dim, metric, locations) {
   return barOpt('bar', cats, vals, rows, dim)
 }
 
+
+// ============ 图表菜单配置 ============
 export { getChartOption }
 export const CG = [
-  { label: '', children: [{ label: 'KPI指标卡', value: 'kpi' }, { label: '热力区域图', value: 'heatmap' }] },
+  { label: '', children: [
+    { label: 'KPI指标卡', value: 'kpi' },
+    { label: '热力区域图', value: 'heatmap' }
+  ]},
   { label: '柱状图', children: [
-    { label: '分区柱状图', value: 'bar' }, { label: '堆积柱状图', value: 'stacked' },
-    { label: '多系列柱状图', value: 'multibar' }, { label: '对比柱状图', value: 'contrast' },
+    { label: '分区柱状图', value: 'bar' },
+    { label: '堆积柱状图', value: 'stacked' },
+    { label: '多系列柱状图', value: 'multibar' },
+    { label: '对比柱状图', value: 'contrast' },
     { label: '瀑布图', value: 'waterfall' }
   ]},
   { label: '折线图', children: [
-    { label: '分区折线图', value: 'line' }, { label: '多系列折线图', value: 'multiline' },
-    { label: '折线雷达图', value: 'lineradar' }, { label: '范围面积图', value: 'rangearea' },
+    { label: '分区折线图', value: 'line' },
+    { label: '多系列折线图', value: 'multiline' },
+    { label: '折线雷达图', value: 'lineradar' },
+    { label: '范围面积图', value: 'rangearea' },
     { label: '组合图', value: 'combo' }
   ]},
-  { label: '散点图', children: [{ label: '散点图', value: 'scatter' }, { label: '聚合气泡图', value: 'bubble' }] },
-  { label: '饼图', children: [{ label: '饼图', value: 'pie' }, { label: '多层饼图', value: 'nestedpie' }, { label: '玫瑰图', value: 'rose' }] },
+  { label: '散点图', children: [
+    { label: '散点图', value: 'scatter' },
+    { label: '聚合气泡图', value: 'bubble' }
+  ]},
+  { label: '饼图', children: [
+    { label: '饼图', value: 'pie' },
+    { label: '多层饼图', value: 'nestedpie' },
+    { label: '玫瑰图', value: 'rose' }
+  ]},
   { label: '其他', children: [
-    { label: '矩形树图', value: 'treemap' }, { label: '词云图', value: 'wordcloud' },
-    { label: '漏斗图', value: 'funnel' }, { label: '桑基图', value: 'sankey' },
+    { label: '矩形树图', value: 'treemap' },
+    { label: '词云图', value: 'wordcloud' },
+    { label: '漏斗图', value: 'funnel' },
+    { label: '桑基图', value: 'sankey' },
     { label: '箱型图', value: 'boxplot' }
   ]}
 ]
