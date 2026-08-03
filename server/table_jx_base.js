@@ -1,6 +1,13 @@
 // JX_BASE_TABLE — 指标关联表（对应原 ZB_BASE_TABLE）
 // 将组织单元的维度信息关联到具体指标记录
 
+ // ============ 字段说明 ============
+  // ZZDWNM 组织单元内码
+  // RWID   任务ID
+  // XMID   项目ID
+  // ND     年度
+  // RYLBMC 人员类别
+  // JXKEY  指标关联主键（指向 JX_MX_TABLE.JXKEY）
 function init(db) {
   db.run(`
     CREATE TABLE IF NOT EXISTS JX_BASE_TABLE (
@@ -20,13 +27,7 @@ function init(db) {
     'INSERT INTO JX_BASE_TABLE (ZZDWNM,RWID,XMID,ND,RYLBMC,JXKEY) VALUES (?,?,?,?,?,?)'
   )
 
-  // ============ 字段说明 ============
-  // ZZDWNM 组织单元内码
-  // RWID   任务ID
-  // XMID   项目ID
-  // ND     年度
-  // RYLBMC 人员类别
-  // JXKEY  指标关联主键（指向 JX_MX_TABLE.JXKEY）
+ 
 
   var rows = [
     ['001',   'RW001','XM001','2025','普通','JX1001'],
