@@ -46,11 +46,19 @@ function saveDB() {
   fs.writeFileSync(dbPath, buf)
 }
 
+// ---- 初始化单张表 ----
+function initTable(db, createSQL, tableName, seedFn) {
+  db.run(createSQL)
+  var result = db.exec('SELECT COUNT(*) FROM ' + tableName)
+  if (result[0].values[0][0] > 0) return
+  seedFn(db)
+}
+
 // ---- 查询（返回对象数组） ----
 function queryAll(sql, params) {// 返回：[{ id: 123, name: 'xxx' }, ...]
   if (!db) throw new Error('数据库尚未初始化，请先调用 initDB()')
-  var stmt = db.prepare(sql)
-  if (params) stmt.bind(normalizeParams(params))
+  var stmt = db.prepare(sql)// 把 SQL 字符串编译成一条预处理语句（支持参数绑定，防止SQL注入）
+  if (params) stmt.bind(normalizeParams(params))// 绑定参数
   var rows = []
   while (stmt.step()) {// step() 逐行遍历结果集，getAsObject() 将当前行转为 { 列名: 值 } 的对象
     rows.push(stmt.getAsObject())
@@ -76,4 +84,4 @@ function run(sql, params) {// 返回：{ lastInsertRowid: 5, changes: 1 }
 }
 
 // ---- 导出 ----
-module.exports = { initDB: initDB, queryAll: queryAll, run: run }
+module.exports = { initDB: initDB, queryAll: queryAll, run: run, initTable: initTable }

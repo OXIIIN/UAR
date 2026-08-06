@@ -1,30 +1,12 @@
-// YYGL_ZD_TABLE — 字典表（对应原 ZD_TABLE）
-// 存储人员类别枚举、表头JSON配置、绩效目标数据等
+// YYGL_ZD_TABLE — 字典表
 
-function init(db) {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS YYGL_ZD_TABLE (
-      SSLX TEXT,
-      MC   TEXT,
-      NM   TEXT,
-      XH   INTEGER
-    )
-  `)
-
-  var result = db.exec('SELECT COUNT(*) FROM YYGL_ZD_TABLE')
-  if (result[0].values[0][0] > 0) return
-
-  var stmt = db.prepare(
-    'INSERT INTO YYGL_ZD_TABLE (SSLX,MC,NM,XH) VALUES (?,?,?,?)'
-  )
-
-  // ============ 字段说明 ============
+// ============ 字段说明 ============
   // SSLX 所属类型（RYLBMC=人员类别枚举 / HEADER=表头JSON / INITHEADER=初始表头 / JXMB=绩效数据）
   // MC   名称或值（枚举时为枚举值，HEADER时为JSON字符串，JXMB时为数值）
   // NM   关联编码（JXMB时为组织单元内码）
   // XH   序号
 
-  // 表头配置 JSON（可动态编辑的多层表头结构）
+function init(db) {
   var headerJSON = JSON.stringify([
     {"id":"f-zzdwmc","type":"field","label":"单位名称","fieldKey":"zzdwmc","align":"left"},
     {"id":"f-nd","type":"field","label":"年度","fieldKey":"nd","align":"left"},
@@ -65,19 +47,14 @@ function init(db) {
   ])
 
   var rows = [
-    // ---- 人员类别枚举 ----
     ['RYLBMC',    '普通',        null,      1],
     ['RYLBMC',    '骨干',        null,      2],
     ['RYLBMC',    '核心',        null,      3],
-        // ---- 管理机构枚举 ----
-    ['GLJG',     '集团总部',        'GLJG001', 1],
-    ['GLJG',     '战略投资部',      'GLJG002', 2],
-    ['GLJG',     '区域管理部',      'GLJG003', 3],
-    // ---- 表头配置 ----
+    ['GLJG',     '集团总部',      'GLJG001', 1],
+    ['GLJG',     '战略投资部',    'GLJG002', 2],
+    ['GLJG',     '区域管理部',    'GLJG003', 3],
     ['HEADER',    headerJSON,    null,      1],
-    // ---- 初始表头状态 ----
     ['INITHEADER',null,          null,      1],
-    // ---- 各单位绩效目标值 ----
     ['JXMB',      '75',          '001',     1],
     ['JXMB',      '72',          '002',     1],
     ['JXMB',      '70',          '003',     1],
@@ -85,9 +62,21 @@ function init(db) {
     ['JXMB',      '74',          '005',     1]
   ]
 
-  rows.forEach(function (r) { stmt.run(r) })
-  stmt.free()
-  console.log('已插入 ' + rows.length + ' 条 YYGL_ZD_TABLE 初始数据')
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS YYGL_ZD_TABLE (
+      SSLX TEXT,
+      MC   TEXT,
+      NM   TEXT,
+      XH   INTEGER
+    )`,
+    'YYGL_ZD_TABLE',
+    function (db) {
+      var stmt = db.prepare('INSERT INTO YYGL_ZD_TABLE (SSLX,MC,NM,XH) VALUES (?,?,?,?)')
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 YYGL_ZD_TABLE 初始数据')
+    }
+  )
 }
 
 module.exports = { init: init }

@@ -1,6 +1,4 @@
 // DW_LOCATION_TABLE — 经纬度关联表
-// 两层结构：单位（顶级）+ 部门（二级）
-// 热力图只展示顶级单位，部门数据供钻取或详情使用
 
 // ============ 字段说明 ============
   // NM   组织单元内码（主键，层级编码）
@@ -10,27 +8,7 @@
   // DMNM 单位名称
 
 function init(db) {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS DW_LOCATION_TABLE (
-      NM   TEXT PRIMARY KEY,
-      JD   TEXT,
-      WD   TEXT,
-      DMMC TEXT,
-      DMNM TEXT
-    )
-  `)
-
-  var result = db.exec('SELECT COUNT(*) FROM DW_LOCATION_TABLE')
-  if (result[0].values[0][0] > 0) return
-
-  var stmt = db.prepare(
-    'INSERT INTO DW_LOCATION_TABLE (NM,JD,WD,DMMC,DMNM) VALUES (?,?,?,?,?)'
-  )
-
-  
-
   var rows = [
-    // NM       经度           纬度          地区名称                 单位名称
     ['001',     '104.065735',  '30.659462',  '四川省成都市',           '成都总部'],
     ['001001',  '104.068735',  '30.661462',  '四川省成都市武侯区',     '技术部'],
     ['001002',  '104.070735',  '30.657462',  '四川省成都市锦江区',     '产品部'],
@@ -45,9 +23,22 @@ function init(db) {
     ['005001',  '113.267385',  '23.132063',  '广东省广州市天河区',     '销售部']
   ]
 
-  rows.forEach(function (r) { stmt.run(r) })
-  stmt.free()
-  console.log('已插入 ' + rows.length + ' 条 DW_LOCATION_TABLE 初始数据（两层结构：5单位+7部门）')
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS DW_LOCATION_TABLE (
+      NM   TEXT PRIMARY KEY,
+      JD   TEXT,
+      WD   TEXT,
+      DMMC TEXT,
+      DMNM TEXT
+    )`,
+    'DW_LOCATION_TABLE',
+    function (db) {
+      var stmt = db.prepare('INSERT INTO DW_LOCATION_TABLE (NM,JD,WD,DMMC,DMNM) VALUES (?,?,?,?,?)')
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 DW_LOCATION_TABLE 初始数据（两层结构：5单位+7部门）')
+    }
+  )
 }
 
 module.exports = { init: init }

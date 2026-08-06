@@ -2,12 +2,7 @@
 var MARGIN_MAP = { narrow: '10mm', normal: '15mm', wide: '20mm' }
 
 // ---- 维度选项 ----
-var DIM_OPTIONS = [
-  { label: '年度', value: 'nd' },
-  { label: '单位', value: 'zzdwmc' },
-  { label: '任务', value: 'rwmc' },
-  { label: '项目', value: 'xmmc' }
-]
+var { DIM_OPTS } = require('./userListUtils')
 
 // ---- 固定基础信息列 ----
 var FIXED_COLUMNS = [
@@ -83,7 +78,7 @@ function movColumns(selectedKeys) {// 根据用户勾选的 group key 列表，�
 // ---- 构建扁平标签查找表 ----
 // 将所有可能的 key（维度、固定列、活动列组 + 子列）映射到中文标签
 var LABEL_FLAT = {}
-DIM_OPTIONS.forEach(function (d) { LABEL_FLAT[d.value] = d.label })
+DIM_OPTS.forEach(function (d) { LABEL_FLAT[d.value] = d.label })
 FIXED_COLUMNS.forEach(function (c) { LABEL_FLAT[c.key] = c.label })
 MOV_GROUPS.forEach(function (g) {
   LABEL_FLAT[g.key] = g.label
@@ -124,7 +119,7 @@ function buildReportSQL(dims, selectedGroups) {
   var groupByParts = dims.map(function (d) { return d.toUpperCase() }).concat(['RYLBMC', 'GLJGMC'])
   var selectParts = dims.map(function (d) { return d.toUpperCase() + ' as ' + d }).concat(['RYLBMC as rylbmc', 'GLJGMC as gljgmc'])
 
-  var hasDwmc = dims.indexOf('zzdwmc') !== -1
+  var hasDwmc = dims.indexOf('ZZDWMC') !== -1
   if (hasDwmc) {// 当维度包含单位名称时，额外查询 ZZDWNM（内码）
     selectParts.push('ZZDWNM as zzdwnm')
     groupByParts.push('ZZDWNM')
@@ -142,7 +137,7 @@ function buildReportSQL(dims, selectedGroups) {
   })
 
   var orderParts = dims.map(function (dim) {
-    if (dim === 'zzdwmc') return 'ZZDWNM'
+    if (dim === 'ZZDWMC') return 'ZZDWNM'
     return dim.toUpperCase()
   }).concat(['RYLBMC', 'GLJGMC'])
 
@@ -206,7 +201,7 @@ function applyLabels(nodes, labels) {// 将编辑后的标签回写到表头树�
 
 module.exports = {
   MARGIN_MAP,
-  DIM_OPTIONS, FIXED_COLUMNS, MOV_GROUPS, DEFAULT_COLUMNS,
+  DIM_OPTS, FIXED_COLUMNS, MOV_GROUPS, DEFAULT_COLUMNS,
   movColumns, LABEL_FLAT,
   GROUP_SQL, buildReportSQL,
   MET_LABELS,

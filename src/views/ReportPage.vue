@@ -199,9 +199,9 @@
 
 <script>
 import { exportCSV, exportWord, exportPDF } from '../utils/exportUtils'
-import { getChartOption } from '../utils/chartUtils'
+// import { getChartOption } from '../utils/chartUtils'
 import {
-  MARGIN_MAP, DIM_OPTIONS, FIXED_COLUMNS, MOV_GROUPS,
+  MARGIN_MAP, DIM_OPTS, FIXED_COLUMNS, MOV_GROUPS,
   LABEL_FLAT, DEFAULT_COLUMNS, movColumns, MET_LABELS,
   extractLabels, applyLabels
 } from '../utils/reportUtils'
@@ -225,8 +225,8 @@ export default {
       aiSqlRows: null,            // SQL 执行结果的行数据
 
       // ---- 报表配置 ----
-      dimOptions: DIM_OPTIONS,    // 维度选项（年度/单位/任务/项目）
-      selectedDims: ['zzdwmc'],   // 当前选中的维度（多选）
+      dimOptions: DIM_OPTS,    // 维度选项（年度/单位/任务/项目）
+      selectedDims: ['ZZDWMC'],   // 当前选中的维度（多选）
       fixedCols: FIXED_COLUMNS,   // 固定信息列
       allMovGroups: MOV_GROUPS,   // 活动信息列（供"设置表头"弹窗使用）
       selectedCols: DEFAULT_COLUMNS.slice(),  // 当前选中的活动列组 key
@@ -265,7 +265,7 @@ export default {
 
   watch: {
     selectedDims: function (val) {// 维度变化时重新查询报表数据
-      if (!val.length) { this.selectedDims = ['zzdwmc']; return }
+      if (!val.length) { this.selectedDims = ['ZZDWMC']; return }
       this.loadReportData()
     },
     
@@ -445,7 +445,9 @@ export default {
         })
         var qRes = await res2.json()
         if (!qRes.success) { self.$message.error('SQL执行失败：' + qRes.error); return }
-        self.aiSqlRows = qRes.data
+         self.aiSqlRows = (qRes.data && qRes.data.length)
+          ? qRes.data
+          : [{ 提示: '未获取到查询结果，请检查问题描述或 SQL 是否正确' }]
 
         // 步骤 3：从查询结果构建图表数据
         if (qRes.data && qRes.data.length) {
@@ -471,26 +473,74 @@ export default {
       }
     },
 
-    renderAIChart: function (chart) {// 渲染 AI 图表
-      var el = document.getElementById('aiChart')
-      if (!el || !chart || !chart.categories || !chart.series) return
-      if (this.aiChart) this.aiChart.dispose()
-      this.aiChart = echarts.init(el)
-      var dim = chart.dimension
-      var pseudoRows = this.aiSqlRows.map(function (r) {
-        var keys = Object.keys(r)
-        var row = {}
-        row[dim] = String(r[keys[0]] || '未知')
-        row.RYZS = r[keys[1]] || 0
-        row.JXZF = r[keys[1]] || 0
-        row.HYRS = 0; row.WJHRS = 0; row.YFBRS = 0; row.DCRS = 0
-        return row
-      })
-      this.aiChart.setOption(getChartOption(
-        chart.type, chart.categories, chart.series[0].data,
-        pseudoRows, dim, chart.metric, [], null
-      ), true)
-    },
+    // renderAIChart: function (chart) {// 渲染 AI 图表
+    //   var el = document.getElementById('aiChart')
+    //   if (!el || !chart || !chart.categories || !chart.series) return
+    //   if (this.aiChart) this.aiChart.dispose()
+    //   this.aiChart = echarts.init(el)
+    //   var dim = chart.dimension
+    //   var pseudoRows = this.aiSqlRows.map(function (r) {
+    //     var keys = Object.keys(r)
+    //     var row = {}
+    //     row[dim] = String(r[keys[0]] || '未知')
+    //     row.RYZS = r[keys[1]] || 0
+    //     row.JXZF = r[keys[1]] || 0
+    //     row.HYRS = 0; row.WJHRS = 0; row.YFBRS = 0; row.DCRS = 0
+    //     return row
+    //   })
+    //   this.aiChart.setOption(getChartOption(
+    //     chart.type, chart.categories, chart.series[0].data,
+    //     pseudoRows, dim, chart.metric, [], null
+    //   ), true)
+    // },
+    renderAIChart: function (chart) {
+  var el = document.getElementById('aiChart')
+  if (!el || !chart || !chart.categories || !chart.series) return
+  if (this.aiChart) this.aiChart.dispose()
+  this.aiChart = echarts.init(el)
+
+  var cats = chart.categories
+  var vals = chart.series[0].data
+  var name = chart.series[0].name
+  var type = chart.type || 'pie'
+  var opt
+
+  if (type === 'pie' || type === 'rose') {
+    opt = {
+      tooltip: { trigger: 'item' },
+      legend: { bottom: 0, textStyle: { color: '#999' } },
+      series: [{
+        type: 'pie',
+        radius: type === 'rose' ? ['20%', '70%'] : ['40%', '70%'],
+        roseType: type === 'rose' ? 'area' : undefined,
+        data: cats.map(function (c, i) { return { name: c, value: vals[i] } }),
+        label: { color: '#e2e2e2' }
+      }]
+    }
+  } else {
+    opt = {
+      tooltip: { trigger: 'axis' },
+      legend: { bottom: 0, textStyle: { color: '#999' } },
+      grid: { left: 60, right: 20, bottom: 40, top: 30 },
+      xAxis: {
+        type: 'category', data: cats,
+        axisLabel: { color: '#999', rotate: cats.length > 6 ? 30 : 0 }
+      },
+      yAxis: {
+        type: 'value', axisLabel: { color: '#999' },
+        splitLine: { lineStyle: { color: '#2a2a4a' } }
+      },
+      series: [{
+        type: type === 'scatter' ? 'scatter' : type,
+        name: name, data: vals,
+        itemStyle: { color: '#38bdf8' },
+        smooth: type === 'line'
+      }]
+    }
+  }
+
+  this.aiChart.setOption(opt, true)
+},
 
 
     // ================================================================

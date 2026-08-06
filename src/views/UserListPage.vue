@@ -64,7 +64,7 @@
 
     <!-- 搜索框 -->
     <div class="search-bar">
-      <el-input placeholder="搜索" v-model="search" @input="drillPath=[];currentPage=1;loadUsers(search)" clearable></el-input>
+      <el-input placeholder="搜索" v-model="search" @input="onSearch" clearable></el-input>
       <el-button type="danger" plain @click="openPopup('add')">添加</el-button>
     </div>
 
@@ -92,7 +92,7 @@
     <div class="pagination-bar">
       <el-button size="mini" :disabled="currentPage<=1" @click="currentPage=1">首页</el-button>
       <el-button size="mini" :disabled="currentPage<=1" @click="currentPage--">上一页</el-button>
-      <span>共 {{ getDrillRows().length }} 条，第 {{ currentPage }}/{{ totalPages }} 页</span>
+      <span>共 {{ filteredRows.length }} 条，第 {{ currentPage }}/{{ totalPages }} 页</span>
       <el-button size="mini" :disabled="currentPage>=totalPages" @click="currentPage++">下一页</el-button>
       <el-button size="mini" :disabled="currentPage>=totalPages" @click="currentPage=totalPages">末页</el-button>
     </div>
@@ -126,7 +126,7 @@
       </div>
 
       <span slot="footer">
-        <el-button v-if="popupMode!=='detail'" type="danger" @click="savePopup">{{ popupMode==='add'?'添加':'保存' }}</el-button>
+        <el-button v-if="popupMode!=='detail'" type="danger" @click="savePopup">{{ popupMode==='add'?'确认添加':'确认保存' }}</el-button>
         <el-button @click="visPop=false">关闭</el-button>
       </span>
     </el-dialog>
@@ -134,9 +134,9 @@
 </template>
 
 <script>
-import { FIELDS,POP_TITLES, DIM_OPTS, DP_MAP, DNS, ND, MYS, TABLECOLS, getOrgLevel, LEVEL_ORDER,
-         ORG_CODE_MAP, RW_MAP, XM_MAP, GLJG_MAP } from '../utils/userListUtils'
-import { getChartOption, CG } from '../utils/chartUtils'
+import { FIELDS,POP_TITLES, DIM_OPTS, DP_MAP, DNS, ND, MYS, TABLECOLS, LEVEL_ORDER,
+       } from '../utils/userListUtils'
+import { getChartOption, getOrgLevel, CG } from '../utils/chartUtils'
 import { exportCSV } from '../utils/exportUtils'
 import * as echarts from 'echarts'
 import 'echarts-wordcloud'
@@ -147,6 +147,7 @@ export default {
   data: function () {
     return {
       // ---- 页面基础 ----
+      searchTimer: null,
       pageZoom: 0.8,                  // 页面缩放比例
       username: localStorage.getItem('username') || 'admin',
 
@@ -160,7 +161,7 @@ export default {
       currentDim: 'ZZDWMC',           // 当前分析维度
       currentMet: 'count',            // 当前分析指标
       chartType: 'heatmap',           // 当前图表类型
-      forceChartType: null,           // 钻取时强制切换的图表类型（热力图点击后强制 pie）
+      fChartType: null,           // 钻取时强制切换的图表类型（热力图点击后强制 pie）
       kpiData: null,                  // KPI 指标卡数据（非 null 时隐藏 ECharts，显示卡片）
 
       // ---- 钻取相关 ----
@@ -179,9 +180,10 @@ export default {
       popupTitles: POP_TITLES,        // 弹窗标题
       jxData: [],                     // 关联指标数据（详情弹窗中展示）
       jxLoading: false,               // 关联指标加载状态
+      codeMaps: { org: {}, rw: {}, xm: {}, gljg: {} },
 
       // ---- 配置（来自工具文件，不可变） ----
-      fields: FIELDS,                 // 弹窗表单字段配置
+      fields: JSON.parse(JSON.stringify(FIELDS)),      // 弹窗表单字段配置
       chartGroups: CG,                // 图表类型下拉菜单分组
       dimOptions: DIM_OPTS,           // 维度选项
       tableCols: TABLECOLS            // 表格列配置
@@ -189,6 +191,9 @@ export default {
   },
 
   computed: {
+     filteredRows: function () {
+    return this.getDrillRows()
+  },
     totalPages: function () { // 总页数
       return Math.ceil(this.getDrillRows().length / this.pageSize) || 1
     },
@@ -216,12 +221,11 @@ export default {
     users: { handler: function () { // 数据变化时重绘图表
       this.renderChart() 
       },
-      deep: true 
     },
 
     currentDim: function () {// 维度切换时重置钻取路径，清除强制图表类型，重绘
       this.drillPath = []
-      this.forceChartType = null
+      this.fChartType = null
       this.renderChart()
     },
 
@@ -231,7 +235,7 @@ export default {
     },
 
     chartType: function () {// 图表类型切换时重置钻取路径，清除强制图表类型，重绘
-      this.forceChartType = null
+      this.fChartType = null
       this.drillPath = []
       this.renderChart()
     }
@@ -248,6 +252,7 @@ export default {
         return Promise.all([self.loadUsers(), self.loadLocations()])
       })
       .then(function () {
+        self.buildCodeMaps() 
         self.$nextTick(function () { self.initChart() })
       })
   },
@@ -266,13 +271,56 @@ export default {
     // ================================================================
     //  数据加载
     // ================================================================
+    onSearch: function () {
+  var self = this
+  self.drillPath = []
+  self.currentPage = 1
+  clearTimeout(self.searchTimer)
+  self.searchTimer = setTimeout(function () {
+    self.loadUsers(self.search)
+  }, 300)
+},
+    buildCodeMaps: function () {
+  var orgMap = {}, rwMap = {}, xmMap = {}, gljgMap = {}
+  var ndSet = {}, orgSet = {}, rwSet = {}, xmSet = {}, rylbSet = {}, gljgSet = {}
+  this.users.forEach(function (r) {
+    if (r.ZZDWMC && r.ZZDWNM) { orgMap[r.ZZDWMC] = r.ZZDWNM; orgSet[r.ZZDWMC] = 1 }
+    if (r.RWMC && r.RWLXNM)   { rwMap[r.RWMC] = r.RWLXNM;     rwSet[r.RWMC] = 1 }
+    if (r.XMMC && r.XMID)     { xmMap[r.XMMC] = r.XMID;       xmSet[r.XMMC] = 1 }
+    if (r.GLJGMC && r.GLJG)   { gljgMap[r.GLJGMC] = r.GLJG;   gljgSet[r.GLJGMC] = 1 }
+    if (r.ND)    ndSet[r.ND] = 1
+    if (r.RYLBMC) rylbSet[r.RYLBMC] = 1
+  })
+  this.codeMaps = { org: orgMap, rw: rwMap, xm: xmMap, gljg: gljgMap }
+
+  // 动态更新所有下拉选项
+  var self = this
+  var fieldOpts = {
+    'ZZDWMC': Object.keys(orgSet),
+    'ND':     Object.keys(ndSet).sort(),
+    'GLJGMC': Object.keys(gljgSet),
+    'RWMC':   Object.keys(rwSet),
+    'XMMC':   Object.keys(xmSet),
+    'RYLBMC': Object.keys(rylbSet)
+  }
+  Object.keys(fieldOpts).forEach(function (key) {
+    var f = self.fields.find(function (f) { return f.key === key })
+    if (f && fieldOpts[key].length) self.$set(f, 'options', fieldOpts[key])
+  })
+},
+
     loadUsers: function (search) {// 加载主数据
       var self = this
       var url = '/api/users'
       if (search) url += '?search=' + encodeURIComponent(search)
       return fetch(url)
         .then(function (res) { return res.json() })
-        .then(function (json) { if (json.success) self.users = json.data })
+        .then(function (json) {
+        if (json.success) {
+          self.users = json.data
+          if (!search) self.buildCodeMaps()
+        }
+      })
         .catch(function (e) { self.$message.error('加载失败：' + e.message) })
     },
 
@@ -284,41 +332,21 @@ export default {
         .catch(function () {})
     },
 
-    loadDict: function () {// 加载字典数据
-      var self = this
-      // 人员类别下拉选项
-      fetch('/api/dict/RYLBMC')
-        .then(function (r) { return r.json() })
-        .then(function (j) {
-          var opts = (j.success && j.data.length)
-            ? j.data.map(function (d) { return d.MC })
-            : ['普通', '骨干', '核心']  // API 失败时的兜底值
-          var f = self.fields.find(function (f) { return f.key === 'RYLBMC' })
-          if (f) self.$set(f, 'options', opts)  // $set 确保响应式更新
-        }).catch(function () {})
-      // 管理机构下拉选项
-      fetch('/api/dict/GLJG')
-        .then(function (r) { return r.json() })
-        .then(function (j) {
-          var opts = (j.success && j.data.length)
-            ? j.data.map(function (d) { return d.MC })
-            : ['集团总部', '战略投资部', '区域管理部']
-          var f = self.fields.find(function (f) { return f.key === 'GLJGMC' })
-          if (f) self.$set(f, 'options', opts)
-        }).catch(function () {})
-      // 绩效目标值（用于组合图）
-      fetch('/api/dict/JXMB')
-        .then(function (r) { return r.json() })
-        .then(function (j) {
-          if (j.success) {
-            var t = {}
-            j.data.forEach(function (d) {
-              if (d.NM) t[d.NM] = Number(d.MC)
-            })
-            self.orgTargets = t  // { '001': 75, '002': 72, ... }
-          }
-        }).catch(function () {})
-    },
+    loadDict: function () {
+  var self = this
+  fetch('/api/dict/JXMB')
+    .then(function (r) { return r.json() })
+    .then(function (j) {
+      if (j.success) {
+        var t = {}
+        j.data.forEach(function (d) {
+          if (d.NM) t[d.NM] = Number(d.MC)
+        })
+        self.orgTargets = t
+      }
+    })
+    .catch(function (e) { console.warn('JXMB 加载失败：', e.message) })
+},
 
     loadIndicators: function (zzdwnm) {// 加载关联指标
       var self = this
@@ -412,7 +440,7 @@ export default {
     buildOption: function () {// 构建图表配置
       var rows = this.getDrillRows()
       var dim = this.drillPath.length ? this.getDrillKey() : this.currentDim
-      var chartType = this.forceChartType || this.chartType
+      var chartType = this.fChartType || this.chartType
       if (chartType === 'funnel') dim = 'orgLevel'
       if (chartType === 'kpi') {
         rows = rows.filter(function (r) { return r.ZZDWNM && String(r.ZZDWNM).length <= 3 })
@@ -423,12 +451,12 @@ export default {
       var vals = Object.values(data) 
       var targets = null
       if (chartType === 'combo' && dim === 'ZZDWMC' && Object.keys(this.orgTargets).length) {
-        var self = this
-        targets = cats.map(function (name) {
-          var code = ORG_CODE_MAP[name]
-          return code && self.orgTargets[code] != null ? self.orgTargets[code] : null
-        })
-      }
+      var self = this
+      targets = cats.map(function (name) {
+        var code = self.codeMaps.org[name]
+        return code && self.orgTargets[code] != null ? self.orgTargets[code] : null
+      })
+    }
       return getChartOption(chartType, cats, vals, rows, dim, this.currentMet, this.locations, targets)
     },
 
@@ -488,7 +516,7 @@ export default {
     onChartClick: function (params) {// 点击图表触发钻取
       if (!params.name) return
       var self = this
-      var effType = self.forceChartType || self.chartType
+      var effType = self.fChartType || self.chartType
       // 热力图特殊处理：点击后强制进入饼图模式的组织钻取
       if (effType === 'heatmap') {
         var topRow = self.users.find(function (r) {
@@ -497,7 +525,7 @@ export default {
         if (!topRow) return
         self.drillPath = [{ dim: 'ZZDWMC', value: params.name, zzdwnm: topRow.ZZDWNM }]
         self.currentPage = 1
-        self.forceChartType = 'pie'
+        self.fChartType = 'pie'
         self.renderChart()
         return
       }
@@ -526,7 +554,7 @@ export default {
       self.renderChart()
     },
 
-    getDrillRows: function () {// 根据钻取路径过滤数据行
+    getDrillRows: function () {// 根据钻取路径过滤数据行（未钻取时，返回全量数据（搜索过滤后的））
       var rows = this.users
       var orgDrill = null
 
@@ -555,7 +583,8 @@ export default {
 
     drillUp: function (index) {// 面包屑上钻
       this.drillPath = this.drillPath.slice(0, index)
-      if (index === 0) this.forceChartType = null
+      if (index === 0) this.fChartType = null
+      this.currentPage = 1
       this.renderChart()
     },
 
@@ -619,59 +648,60 @@ export default {
       return f.options || [] 
     },
 
-    savePopup: function () {// 保存弹窗
-      var self = this
-      if (!self.popupData.ZZDWMC) {
-        self.$message.warning('请选择单位名称')
-        return
-      }
-      // 通过名称自动补全编码
-      var code = ORG_CODE_MAP[self.popupData.ZZDWMC]
-      if (code) {
-        self.popupData.ZZDWNM = code          // 组织编码
-        self.popupData.ZZDWXH = code          // 组织序号（与编码一致）
-        self.popupData.PARENTID = code.length > 3 ? code.substring(0, code.length - 3) : null
-      }
+    savePopup: function () {
+  var self = this
+  if (!self.popupData.ZZDWMC) {
+    self.$message.warning('请选择单位名称')
+    return
+  }
+  var code = self.codeMaps.org[self.popupData.ZZDWMC]
+  if (code) {
+    self.popupData.ZZDWNM = code
+    self.popupData.ZZDWXH = code
+    self.popupData.PARENTID = code.length > 3 ? code.substring(0, code.length - 3) : null
+  }
+  self.popupData.GLJG   = self.codeMaps.gljg[self.popupData.GLJGMC] || 'GLJG001'
+  self.popupData.GLJGXH = self.popupData.GLJG
+  self.popupData.RWLXNM = self.codeMaps.rw[self.popupData.RWMC] || ''
+  self.popupData.XMID   = self.codeMaps.xm[self.popupData.XMMC] || ''
 
-      self.popupData.GLJG = GLJG_MAP[self.popupData.GLJGMC] || 'GLJG001'
-      self.popupData.GLJGXH = self.popupData.GLJG
-      self.popupData.RWLXNM = RW_MAP[self.popupData.RWMC] || ''
-      self.popupData.XMID = XM_MAP[self.popupData.XMMC] || ''
-
-      if (self.popupMode === 'add') {
-        fetch('/api/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(self.popupData)
-        })
-          .then(function (res) { return res.json() })
-          .then(function (json) {
-            if (json.success) {
-              self.popupData.id = json.id
-              // 前端直接插入新行，避免重新请求全部数据
-              self.users.unshift(Object.assign({}, self.popupData))
-              self.$message.success('添加成功')
-              self.visPop = false
-            }
-          })
-      } else {
-        fetch('/api/users/' + self.popupData.id, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(self.popupData)
-        })
-          .then(function (res) { return res.json() })
-          .then(function (json) {
-            if (json.success) {
-              // 编辑后重新加载全部数据（行的排序/分组可能因修改而变化）
-              self.loadUsers()
-              self.$message.success('保存成功')
-              self.visPop = false
-            }
-          })
-      }
-    },
-
+  if (self.popupMode === 'add') {
+    fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(self.popupData)
+    })
+      .then(function (res) { return res.json() })
+      .then(function (json) {
+        if (json.success) {
+          self.popupData.id = json.id
+          self.users.unshift(Object.assign({}, self.popupData))
+          self.$message.success('添加成功')
+          self.visPop = false
+        } else {
+          self.$message.error(json.error || '添加失败')
+        }
+      })
+      .catch(function (e) { self.$message.error('请求失败：' + e.message) })
+  } else {
+    fetch('/api/users/' + self.popupData.id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(self.popupData)
+    })
+      .then(function (res) { return res.json() })
+      .then(function (json) {
+        if (json.success) {
+          self.loadUsers()
+          self.$message.success('保存成功')
+          self.visPop = false
+        } else {
+          self.$message.error(json.error || '保存失败')
+        }
+      })
+      .catch(function (e) { self.$message.error('请求失败：' + e.message) })
+  }
+},
     deleteUser: function (row) {// 删除单条数据
       var self = this
       self.$confirm('删除「' + row.ZZDWMC + '」（' + row.ND + '）？', '提示', { type: 'warning' })
@@ -681,7 +711,7 @@ export default {
             .then(function (json) {
               if (json.success) {
                 self.loadUsers()
-                self.$nextTick(function () {
+                self.loadUsers().then(function () {
                   if (self.currentPage > self.totalPages) self.currentPage = self.totalPages
                 })
                 self.$message.success('删除成功')

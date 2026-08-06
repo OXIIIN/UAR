@@ -167,7 +167,6 @@ function barOpt(type, cats, vals, rows, dim) {
   var S = []
 
   if (type === 'bar') {// 分区柱状图
-    var dimColors = ['#38bdf8','#f0c040','#e94560','#4ecb71','#6c5ce7','#ff7849','#00cec9','#888']
     var groups = groupByDim(rows, dim)  // 预分组
     S = cats.map(function (cat, i) {
       var grp = groups[cat] || []
@@ -176,7 +175,7 @@ function barOpt(type, cats, vals, rows, dim) {
         data: STS_FIELDS.map(function (field) {
           return grp.reduce(function (sum, r) { return sum + Number(r[field] || 0) }, 0)
         }),
-        itemStyle: { color: dimColors[i % dimColors.length] },
+        itemStyle: { color: CC[i % CC.length] },
         barWidth: '15%'
       }
     })
@@ -335,56 +334,95 @@ function lineOpt(type, cats, vals, rows, dim) {
 
 
 // ---- 雷达图 ----
+// function radarOpt(cats, vals, rows, dim) {
+//   var groups = groupByDim(rows, dim)  // 预分组一次
+
+//   var catMetrics = cats.map(function (cat) {
+//     var grp = groups[cat] || []
+//     var totalRyzs = grp.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0)
+//     var safeRyzs = totalRyzs || 1  // 除零保护
+//     return {
+//       count: totalRyzs,
+//       // 人均绩效 = 绩效总分 / 员工总数
+//       avgScore: +(grp.reduce(function (a, r) { return a + Number(r.JXZF || 0) }, 0) / safeRyzs).toFixed(1),
+//       // 活跃率 = 活跃人数 / 员工总数 × 100
+//       avgHyl: +(grp.reduce(function (a, r) { return a + Number(r.HYRS || 0) }, 0) / safeRyzs * 100).toFixed(1)
+//     }
+//   })
+
+//   var maxCount = Math.max.apply(null, catMetrics.map(function (m) { return m.count }).concat([1]))
+//   var indicator = cats.map(function (c) { return { name: c, max: 100 } })
+
+//   var seriesData = [
+//     {
+//       name: '员工占比',
+//       value: catMetrics.map(function (m) { return +(m.count / maxCount * 100).toFixed(1) }),
+//       lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
+//     },
+//     {
+//       name: '人均绩效',
+//       value: catMetrics.map(function (m) { return m.avgScore }),
+//       lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
+//     },
+//     {
+//       name: '活跃率',
+//       value: catMetrics.map(function (m) { return m.avgHyl }),
+//       lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
+//     }
+//   ]
+
+//   return {
+//     tooltip: { trigger: 'item' }, legend: LEG,
+//     radar: {
+//       indicator: indicator, shape: 'polygon',
+//       splitArea: { areaStyle: { color: ['#16213e', '#1a2745'] } },
+//       splitLine: { lineStyle: { color: '#2a2a4a' } },
+//       axisName: { color: '#999' },
+//       axisLine: { lineStyle: { color: '#2a2a4a' } }
+//     },
+//     series: [{ type: 'radar', data: seriesData }]
+//   }
+// }
 function radarOpt(cats, vals, rows, dim) {
-  var groups = groupByDim(rows, dim)  // 预分组一次
+  var groups = groupByDim(rows, dim)
+  var scoreData = avgD(cats, rows, dim)
+  var hylData = avgD(cats, rows, dim, 'hyl')
 
-  var catMetrics = cats.map(function (cat) {
-    var grp = groups[cat] || []
-    var totalRyzs = grp.reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0)
-    var safeRyzs = totalRyzs || 1  // 除零保护
-    return {
-      count: totalRyzs,
-      // 人均绩效 = 绩效总分 / 员工总数
-      avgScore: +(grp.reduce(function (a, r) { return a + Number(r.JXZF || 0) }, 0) / safeRyzs).toFixed(1),
-      // 活跃率 = 活跃人数 / 员工总数 × 100
-      avgHyl: +(grp.reduce(function (a, r) { return a + Number(r.HYRS || 0) }, 0) / safeRyzs * 100).toFixed(1)
-    }
+  var counts = cats.map(function (cat) {
+    return (groups[cat] || []).reduce(function (a, r) { return a + Number(r.RYZS || 0) }, 0)
   })
-
-  var maxCount = Math.max.apply(null, catMetrics.map(function (m) { return m.count }).concat([1]))
+  var maxCount = Math.max.apply(null, counts.concat([1]))
   var indicator = cats.map(function (c) { return { name: c, max: 100 } })
 
   var seriesData = [
     {
       name: '员工占比',
-      value: catMetrics.map(function (m) { return +(m.count / maxCount * 100).toFixed(1) }),
+      value: counts.map(function (c) { return +(c / maxCount * 100).toFixed(1) }),
       lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
     },
     {
       name: '人均绩效',
-      value: catMetrics.map(function (m) { return m.avgScore }),
+      value: scoreData.map(function (d) { return d.value }),
       lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
     },
     {
       name: '活跃率',
-      value: catMetrics.map(function (m) { return m.avgHyl }),
+      value: hylData.map(function (d) { return d.value }),
       lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.15 }
     }
   ]
-
   return {
-    tooltip: { trigger: 'item' }, legend: LEG,
-    radar: {
-      indicator: indicator, shape: 'polygon',
-      splitArea: { areaStyle: { color: ['#16213e', '#1a2745'] } },
-      splitLine: { lineStyle: { color: '#2a2a4a' } },
-      axisName: { color: '#999' },
-      axisLine: { lineStyle: { color: '#2a2a4a' } }
-    },
-    series: [{ type: 'radar', data: seriesData }]
+      tooltip: { trigger: 'item' }, legend: LEG,
+      radar: {
+        indicator: indicator, shape: 'polygon',
+        splitArea: { areaStyle: { color: ['#16213e', '#1a2745'] } },
+        splitLine: { lineStyle: { color: '#2a2a4a' } },
+        axisName: { color: '#999' },
+        axisLine: { lineStyle: { color: '#2a2a4a' } }
+      },
+      series: [{ type: 'radar', data: seriesData }]
+    }
   }
-}
-
 
 // ---- 散点图 ----
 function scatterOpt(type, cats, vals, rows, dim) {
@@ -634,7 +672,7 @@ function getChartOption(type, cats, vals, rows, dim, metric, locations, targets)
 
 
 // ============ 图表菜单配置 ============
-export { getChartOption }
+export { getChartOption, getOrgLevel }
 export const CG = [
   { label: '', children: [
     { label: 'KPI指标卡', value: 'kpi' },

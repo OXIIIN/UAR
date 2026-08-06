@@ -2,45 +2,6 @@
 // 排序规则：(GLJG+RWID+XMID) → RYLBMC(普通→骨干→核心) → ND(降序) → 层级深度优先
 
 function init(db) {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS YYGL_DATA_TABLE (
-      ZZDWNM   TEXT    NOT NULL,   -- 组织单元内码，如 001=成都总部, 001001=技术部, 001001001=前端组
-      ZZDWMC   TEXT,               -- 组织单元名称
-      ZZDWXH   TEXT,               -- 组织单元序号（与内码一致，用于前端排序）
-      ND       INTEGER,            -- 年度，如 2025、2024
-      GLJG     TEXT,               -- 合作机构编码（GLJG001=集团总部 / GLJG002=战略投资部 / GLJG003=区域管理部）
-      GLJGMC   TEXT,               -- 合作机构名称
-      GLJGXH   TEXT,               -- 合作机构序号（与编码一致，用于前端排序）
-      RWID     TEXT,               -- 任务ID，如 RW001=年度绩效考核, RW002=专项技能评估
-      RWMC     TEXT,               -- 任务名称
-      RWLXNM   TEXT,               -- 任务类型编码，如 RWLX001, RWLX002
-      XMID     TEXT,               -- 项目ID，如 XM001=项目A, XM002=项目B, XM003=项目C
-      XMMC     TEXT,               -- 项目名称
-      RYLBMC   TEXT,               -- 人员类别（普通 / 骨干 / 核心）
-      DWGS     TEXT,               -- 涉及考核单位数（该组织单元下参与考核的子单位数量）
-      RYZS     REAL,               -- 员工总数
-      JXZF     REAL,               -- 绩效总分（所有员工绩效得分之和）
-      HYRS     REAL,               -- 活跃人数
-      HYJXZF   REAL,               -- 活跃人员绩效总分
-      WJHRS    REAL,               -- 未激活人数
-      WJHJXZF  REAL,               -- 未激活人员绩效总分
-      YFBRS    REAL,               -- 已封禁人数
-      YFBJXZF  REAL,               -- 已封禁人员绩效总分
-      DCRS     REAL,               -- 待评估人数（待确认/待审核人数）
-      DCJXZF   REAL,               -- 待评估人员绩效总分
-      HYL      REAL,               -- 活跃率%（HYRS / RYZS × 100）
-      JXPJFL   REAL,               -- 绩效达标率%（达标人数 / 应考核人数 × 100）
-      PARENTID TEXT                 -- 上级组织单元内码（顶级单位为 null）
-    )
-  `)
-
-  var result = db.exec('SELECT COUNT(*) FROM YYGL_DATA_TABLE')
-  if (result[0].values[0][0] > 0) return
-
-  var stmt = db.prepare(
-    'INSERT INTO YYGL_DATA_TABLE (ZZDWNM,ZZDWMC,ZZDWXH,ND,GLJG,GLJGMC,GLJGXH,RWID,RWMC,RWLXNM,XMID,XMMC,RYLBMC,DWGS,RYZS,JXZF,HYRS,HYJXZF,WJHRS,WJHJXZF,YFBRS,YFBJXZF,DCRS,DCJXZF,HYL,JXPJFL,PARENTID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
-  )
-
   var rows = [
     // ==============================================================================
     // GLJG001 集团总部 / RW001 年度绩效考核 / XM001 项目A
@@ -169,9 +130,46 @@ function init(db) {
     ['005001','销售部','005001',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','1',3,219,3,219,0,0,0,0,0,0,100,100,'005']
   ]
 
-  rows.forEach(function (r) { stmt.run(r) })
-  stmt.free()
-  console.log('已插入 ' + rows.length + ' 条 YYGL_DATA_TABLE 初始数据')
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS YYGL_DATA_TABLE (
+      ZZDWNM   TEXT    NOT NULL,
+      ZZDWMC   TEXT,
+      ZZDWXH   TEXT,
+      ND       INTEGER,
+      GLJG     TEXT,
+      GLJGMC   TEXT,
+      GLJGXH   TEXT,
+      RWID     TEXT,
+      RWMC     TEXT,
+      RWLXNM   TEXT,
+      XMID     TEXT,
+      XMMC     TEXT,
+      RYLBMC   TEXT,
+      DWGS     TEXT,
+      RYZS     REAL,
+      JXZF     REAL,
+      HYRS     REAL,
+      HYJXZF   REAL,
+      WJHRS    REAL,
+      WJHJXZF  REAL,
+      YFBRS    REAL,
+      YFBJXZF  REAL,
+      DCRS     REAL,
+      DCJXZF   REAL,
+      HYL      REAL,
+      JXPJFL   REAL,
+      PARENTID TEXT
+    )`,
+    'YYGL_DATA_TABLE',
+    function (db) {
+      var stmt = db.prepare(
+        'INSERT INTO YYGL_DATA_TABLE (ZZDWNM,ZZDWMC,ZZDWXH,ND,GLJG,GLJGMC,GLJGXH,RWID,RWMC,RWLXNM,XMID,XMMC,RYLBMC,DWGS,RYZS,JXZF,HYRS,HYJXZF,WJHRS,WJHJXZF,YFBRS,YFBJXZF,DCRS,DCJXZF,HYL,JXPJFL,PARENTID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+      )
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 YYGL_DATA_TABLE 初始数据')
+    }
+  )
 }
 
 module.exports = { init: init }
