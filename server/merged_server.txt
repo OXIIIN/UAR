@@ -1,0 +1,868 @@
+【后端服务】合并时间：2026/8/8 22:34:16
+文件列表：./db.js, ./prompt.js, ./server.js, ./table_data.js, ./table_jx_base.js, ./table_jx_mx.js, ./table_location.js, ./table_zd.js
+
+================================================================================
+
+📄 ./db.js（87 行）
+
+================================================================================
+
+// ---- 导入依赖 ----
+var initSqlJs = require('sql.js')   
+var fs = require('fs')             
+
+// ---- 模块级变量 ----
+var db = null
+var dbPath = './data.db'           
+
+// ---- 导入表模块 ----
+var allTables = [
+  require('./table_data'),       // 主数据表 YYGL_DATA_TABLE
+  require('./table_location'),   // 经纬度表 DW_LOCATION_TABLE
+  require('./table_jx_base'),    // 指标关联表 JX_BASE_TABLE
+  require('./table_jx_mx'),      // 指标明细表 JX_MX_TABLE
+  require('./table_zd')          // 字典表 YYGL_ZD_TABLE
+]
+
+// ---- 参数标准化函数 ----
+function normalizeParams(params) {// 将 JS 中的各种"空值"（undefined / null）统一转为 null
+  if (!params) return []
+  return params.map(function (p) { return p == null ? null : p })
+}
+
+// ---- 初始化数据库 ----
+function initDB(callback) {
+  return initSqlJs().then(function (SQL) {
+    if (fs.existsSync(dbPath)) {
+      var buf = fs.readFileSync(dbPath)
+      db = new SQL.Database(buf)  // sql.js 接受 Uint8Array 或 Buffer
+    } else {
+      db = new SQL.Database()
+    }
+    // 依次调用每张表模块的 init 方法
+    allTables.forEach(function (t) { t.init(db) })
+    saveDB()
+
+  }).catch(function (err) {
+    console.error('数据库初始化失败：', err)
+    throw err
+  })
+}
+// ---- 保存数据库到文件 ----
+function saveDB() {
+  var data = db.export()
+  var buf = Buffer.from(data)
+  fs.writeFileSync(dbPath, buf)
+}
+
+// ---- 初始化单张表 ----
+function initTable(db, createSQL, tableName, seedFn) {
+  db.run(createSQL)
+  var result = db.exec('SELECT COUNT(*) FROM ' + tableName)
+  if (result[0].values[0][0] > 0) return
+  seedFn(db)
+}
+
+// ---- 查询（返回对象数组） ----
+function queryAll(sql, params) {// 返回：[{ id: 123, name: 'xxx' }, ...]
+  if (!db) throw new Error('数据库尚未初始化，请先调用 initDB()')
+  var stmt = db.prepare(sql)// 把 SQL 字符串编译成一条预处理语句（支持参数绑定，防止SQL注入）
+  if (params) stmt.bind(normalizeParams(params))// 绑定参数
+  var rows = []
+  while (stmt.step()) {// step() 逐行遍历结果集，getAsObject() 将当前行转为 { 列名: 值 } 的对象
+    rows.push(stmt.getAsObject())
+  }
+  stmt.free()
+  return rows
+}
+
+// ---- 执行（INSERT / UPDATE / DELETE） ----
+function run(sql, params) {// 返回：{ lastInsertRowid: 5, changes: 1 }
+  if (!db) throw new Error('数据库尚未初始化，请先调用 initDB()')
+  db.run(sql, normalizeParams(params))
+  var changes = db.getRowsModified()// getRowsModified() 返回本次操作影响的行数
+  // 只有 INSERT 操作需要获取自增主键（last_insert_rowid）
+  // 用正则判断 SQL 语句类型：^\s* 允许前面有空白，/i 忽略大小写
+  var isInsert = /^\s*INSERT/i.test(sql)
+  var lastInsertRowid = isInsert
+    ? db.exec('SELECT last_insert_rowid()')[0].values[0][0]
+    : null
+
+  saveDB()
+  return { lastInsertRowid: lastInsertRowid, changes: changes }
+}
+
+// ---- 导出 ----
+module.exports = { initDB: initDB, queryAll: queryAll, run: run, initTable: initTable }
+
+================================================================================
+
+📄 ./prompt.js（65 行）
+
+================================================================================
+
+var SCHEMA = `共5张表：
+
+1. 主数据表 YYGL_DATA_TABLE：
+ZZDWNM(组织单元内码,层级编码如'001','001001','001001001'),
+ZZDWMC(组织单元名称), ZZDWXH(组织单元序号),
+ND(年度,整数,取值2020-2025),
+GLJG(合作机构编码), GLJGMC(合作机构名称,取值:集团总部/战略投资部/区域管理部), GLJGXH(合作机构序号),
+RWID(任务ID), RWMC(任务名称), RWLXNM(任务类型编码),
+XMID(项目ID), XMMC(项目名称),
+RYLBMC(人员类别,取值:普通/骨干/核心), DWGS(涉及考核单位数,文本),
+RYZS(员工总数,数值), JXZF(绩效总分,数值),
+HYRS(活跃人数), HYJXZF(活跃绩效总分),
+WJHRS(未激活人数), WJHJXZF(未激活绩效总分),
+YFBRS(已封禁人数), YFBJXZF(已封禁绩效总分),
+DCRS(待评估人数), DCJXZF(待评估绩效总分),
+HYL(活跃率%,数值), JXPJFL(绩效达标率%,数值),
+PARENTID(上级组织单元内码)
+
+ 组织层级规则（非常重要）：
+ - ZZDWNM长度3位(如'001')=一级单位(总部/分部)，PARENTID为null
+ - ZZDWNM长度6位(如'001001')=二级单位(部门)，PARENTID='001'
+ - ZZDWNM长度9位(如'001001001')=三级单位(小组)，PARENTID='001001'
+ - 查询某单位下所有子级：WHERE ZZDWNM LIKE '父编码%' AND ZZDWNM != '父编码'
+ - 按层级过滤：WHERE LENGTH(ZZDWNM)=3只查一级，=6只查二级，=9只查三级
+
+2. 经纬度表 DW_LOCATION_TABLE：
+NM(主键,组织单元内码), JD(经度), WD(纬度), DMMC(地区名称), DMNM(单位名称)
+与主表通过 NM = ZZDWNM 关联
+
+3. 指标关联表 JX_BASE_TABLE：
+ZZDWNM(组织单元内码), RWID(任务ID), XMID(项目ID), ND(年度), RYLBMC(人员类别), JXKEY(指标主键)
+与主表通过 ZZDWNM 关联，与明细表通过 JXKEY 关联
+
+4. 指标明细表 JX_MX_TABLE：
+JXKEY(指标主键), TYPE(类型:jxlx=指标类型/title=指标名称/value=数值/jldw=计量单位), VALUE(值)
+KV结构，一条指标对应4行（jxlx/title/value/jldw）
+
+5. 字典表 YYGL_ZD_TABLE：
+SSLX(所属类型:RYLBMC=人员类别/GLJG=合作机构/JXMB=绩效目标), MC(名称或值), NM(关联编码), XH(序号)`
+
+var SYSTEM_PROMPT = `你是一个数据分析助手。用户会用自然语言提问数据相关问题。
+请根据问题生成 SQLite 语法的 SQL 查询语句。
+返回格式必须严格为以下 JSON，不要包含任何其他文字或代码块标记：
+{"sql":"SELECT ...","chart_type":"bar","title":"图表标题"}
+chart_type 只能是：pie, bar, line, radar, scatter
+在未说明图表类型时，一律使用饼图（pie）
+SQL 规则：
+1. 员工总数汇总用 SUM(RYZS)，绩效总分汇总用 SUM(JXZF)
+2. 平均绩效分：ROUND(SUM(JXZF*1.0)/NULLIF(SUM(RYZS),0),1)
+3. 活跃率：ROUND(100.0*SUM(HYRS)/NULLIF(SUM(RYZS),0),1)
+4. 绩效达标率：ROUND(100.0*SUM(JXZF)/NULLIF(SUM(RYZS*100.0),0),1)
+5. 查询结果第一列是分组维度（图表分类轴），第二列是统计结果（图表数值轴）
+6. 按组织名称查询用 ZZDWMC，按年度查询用 ND
+组织层级查询规则：
+7. 用户说"单位/总部/分部"→ WHERE LENGTH(ZZDWNM)=3（一级单位，如成都总部、重庆分部）
+8. 用户说"部门"→ WHERE LENGTH(ZZDWNM)=6（二级单位，如技术部、产品部）
+9. 用户说"小组/组"→ WHERE LENGTH(ZZDWNM)=9（三级单位，如前端组、后端组）
+10. 用户说"成都总部的部门"→ WHERE ZZDWNM LIKE '001%' AND LENGTH(ZZDWNM)=6
+11. 用户说"技术部的小组"→ WHERE ZZDWNM LIKE '001001%' AND LENGTH(ZZDWNM)=9
+12. 不指定层级时，默认只查一级单位（LENGTH(ZZDWNM)=3）
+13. 用户提到具体组织名称（如"技术部"、"前端组"、"成都总部"）→ 必须用 WHERE ZZDWMC = '技术部' 精确匹配该单位，不要使用 LENGTH 或 LIKE 泛化到同级所有单位
+14. 重要区分："技术部"是一个具体单位（用 WHERE ZZDWMC='技术部'），"部门"才是泛指所有二级单位（用 WHERE LENGTH(ZZDWNM)=6）。绝对不要把具体单位名称误解为层级泛指
+数据表结构：${SCHEMA}`
+
+module.exports = { SCHEMA: SCHEMA, SYSTEM_PROMPT: SYSTEM_PROMPT }
+
+================================================================================
+
+📄 ./server.js（267 行）
+
+================================================================================
+
+// ---- 导入依赖 ----
+const cors = require('cors')                              
+const fetch = require('node-fetch')                     
+const dbModule = require('./db')                       
+const express = require('express')                       
+const { buildReportSQL } = require('../src/utils/reportUtils') 
+const { SYSTEM_PROMPT } = require('./prompt') 
+
+const app = express()
+app.use(cors())                                          
+app.use(express.json())                                   
+
+// ---- API Key ----
+const API_KEY = process.env.DASHSCOPE_API_KEY
+console.log('API Key:', API_KEY
+  ? '已读取（前5位：' + API_KEY.slice(0, 5) + '）'
+  : '未读取到')
+
+// ============ AI 分析 ============
+app.post('/api/ask', async function (req, res) {// 提问AI返回sql
+  const question = req.body.question
+  if (!question || !question.trim()) {
+    return res.json({ success: false, error: '请输入问题' })
+  }
+
+  try {
+    const resp = await fetch(
+      'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + API_KEY
+        },
+        body: JSON.stringify({
+          model: 'qwen3.7-flash-2026-07-15',
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },  
+            { role: 'user', content: question }         
+          ],
+          temperature: 0.2  
+        })
+      }
+    )
+
+    const data = await resp.json()
+    console.log('API 响应：', JSON.stringify(data, null, 2))
+
+    if (data.error) {
+      return res.json({ success: false, error: data.error.message || JSON.stringify(data.error) })
+    }
+
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      return res.json({ success: false, error: 'API返回格式异常：' + JSON.stringify(data) })
+    }
+
+    // 提取 AI 返回的文本内容
+    const content = data.choices[0].message.content
+    console.log('大模型原始返回：', content)
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return res.json({ success: false, error: 'AI未返回有效JSON：' + content })
+    }
+
+    const result = JSON.parse(jsonMatch[0])
+    
+    res.json({ success: true, data: result })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.post('/api/query', function (req, res) {// 执行 AI 生成的 SQL 
+  try {
+    const sql = req.body.sql
+    if (!sql || !sql.trim().toUpperCase().startsWith('SELECT')) {
+      return res.json({ success: false, error: '只允许查询操作' })
+    }
+    res.json({ success: true, data: dbModule.queryAll(sql) })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+// ============ 用户 ============
+app.get('/api/users', function (req, res) {// 查询数据列表（支持搜索） 
+  try {
+    const search = req.query.search || ''
+    let data
+
+    if (search) {
+      const fields = [// 搜索字段
+        'ZZDWNM', 'ZZDWMC', 'CAST(ND AS TEXT)', 'GLJGMC', 'RWID', 'RWMC',
+        'XMID', 'XMMC', 'RYLBMC', 'DWGS'
+      ]
+      const sql = 'SELECT rowid as id, * FROM YYGL_DATA_TABLE WHERE ' +
+        fields.map(function (f) { return f + ' LIKE ?' }).join(' OR ') +
+        ' ORDER BY ZZDWNM, ND DESC'
+      const params = fields.map(function () { return '%' + search + '%' })
+      data = dbModule.queryAll(sql, params)
+    } else {
+      data = dbModule.queryAll(
+        'SELECT rowid as id, * FROM YYGL_DATA_TABLE ORDER BY ZZDWNM, ND DESC'
+      )
+    }
+
+    res.json({ success: true, data: data })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.post('/api/users', function (req, res) {// 接收前端表单数据，插入主数据表
+  try {
+    const u = req.body
+    if (!u || !u.ZZDWMC) {
+      return res.json({ success: false, error: '缺少必填字段' })
+    }
+
+    const result = dbModule.run(
+      'INSERT INTO YYGL_DATA_TABLE (ZZDWNM,ZZDWMC,ZZDWXH,ND,GLJG,GLJGMC,GLJGXH,RWID,RWMC,RWLXNM,XMID,XMMC,RYLBMC,DWGS,RYZS,JXZF,HYRS,HYJXZF,WJHRS,WJHJXZF,YFBRS,YFBJXZF,DCRS,DCJXZF,HYL,JXPJFL,PARENTID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [u.ZZDWNM, u.ZZDWMC, u.ZZDWXH, u.ND, u.GLJG, u.GLJGMC, u.GLJGXH,
+       u.RWID, u.RWMC, u.RWLXNM, u.XMID, u.XMMC, u.RYLBMC, u.DWGS,
+       u.RYZS || 0, u.JXZF || 0, u.HYRS || 0, u.HYJXZF || 0,
+       u.WJHRS || 0, u.WJHJXZF || 0, u.YFBRS || 0, u.YFBJXZF || 0,
+       u.DCRS || 0, u.DCJXZF || 0, u.HYL || 0, u.JXPJFL || 0, u.PARENTID]
+    )
+
+    if (result.changes === 0) {
+      return res.json({ success: false, error: '新增失败' })
+    }
+    res.json({ success: true, id: result.lastInsertRowid })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.put('/api/users/:id', function (req, res) {// 编辑数据 
+  try {
+    const id = Number(req.params.id)
+    if (!id || id <= 0) {
+      return res.json({ success: false, error: '无效的记录ID' })
+    }
+
+    const u = req.body
+    dbModule.run(
+      'UPDATE YYGL_DATA_TABLE SET ZZDWNM=?,ZZDWMC=?,ZZDWXH=?,ND=?,GLJG=?,GLJGMC=?,GLJGXH=?,RWID=?,RWMC=?,RWLXNM=?,XMID=?,XMMC=?,RYLBMC=?,DWGS=?,RYZS=?,JXZF=?,HYRS=?,HYJXZF=?,WJHRS=?,WJHJXZF=?,YFBRS=?,YFBJXZF=?,DCRS=?,DCJXZF=?,HYL=?,JXPJFL=?,PARENTID=? WHERE rowid=?',
+      [u.ZZDWNM, u.ZZDWMC, u.ZZDWXH, u.ND, u.GLJG, u.GLJGMC, u.GLJGXH,
+       u.RWID, u.RWMC, u.RWLXNM, u.XMID, u.XMMC, u.RYLBMC, u.DWGS,
+       u.RYZS, u.JXZF, u.HYRS, u.HYJXZF,
+       u.WJHRS, u.WJHJXZF, u.YFBRS, u.YFBJXZF,
+       u.DCRS, u.DCJXZF, u.HYL, u.JXPJFL, u.PARENTID,
+       id]
+    )
+    res.json({ success: true })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.delete('/api/users/:id', function (req, res) {// 删除
+  try {
+    dbModule.run('DELETE FROM YYGL_DATA_TABLE WHERE rowid=?', [Number(req.params.id)])
+    res.json({ success: true })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.post('/api/users/batch-delete', function (req, res) {// 批量删除
+  try {
+    const ids = req.body.ids
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.json({ success: false, error: '请选择要删除的记录' })
+    }
+
+    const placeholders = ids.map(function () { return '?' }).join(',')
+    const result = dbModule.run(
+      'DELETE FROM YYGL_DATA_TABLE WHERE rowid IN (' + placeholders + ')', ids
+    )
+    res.json({ success: true, deleted: result.changes })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+// ============ 报表 & 字典 ============
+app.post('/api/report', function (req, res) {// 接收维度和列组配置，调用 buildReportSQL 生成 SQL 后执行
+  try {
+    const dims = req.body.dims
+    const selectedGroups = req.body.selectedGroups || []
+    const sql = buildReportSQL(dims, selectedGroups)
+    console.log('报表SQL：', sql)
+    const rows = dbModule.queryAll(sql)
+    res.json({ success: true, data: rows, sql: sql })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/locations', function (req, res) {// 经纬度数据（热力图使用） 
+  try {
+    const rows = dbModule.queryAll('SELECT * FROM DW_LOCATION_TABLE')
+    res.json({ success: true, data: rows })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/dict/:type', function (req, res) {// 按 SSLX（所属类型）查询字典项，返回名称、编码、序号
+  try {
+    const rows = dbModule.queryAll(
+      'SELECT MC, NM, XH FROM YYGL_ZD_TABLE WHERE SSLX = ? ORDER BY XH',
+      [req.params.type]
+    )
+    res.json({ success: true, data: rows })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.put('/api/dict/:type', function (req, res) {//更新该类型下所有行（适用于 HEADER / INITHEADER 等单行类型）
+  try {
+    const mc = req.body.MC
+    if (mc == null) {
+      return res.json({ success: false, error: '缺少 MC 参数' })
+    }
+    const result = dbModule.run(
+      'UPDATE YYGL_ZD_TABLE SET MC = ? WHERE SSLX = ?',
+      [mc, req.params.type]
+    )
+    res.json({ success: true, changes: result.changes })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+app.get('/api/indicators', function (req, res) {// 通过 JXKEY 关联 JX_BASE_TABLE 和 JX_MX_TABLE，返回指定组织单元的所有指标及其 KV 明细
+  try {
+    const zzdwnm = req.query.zzdwnm || ''
+    if (!zzdwnm) {
+      return res.json({ success: true, data: [] })
+    }
+
+    const rows = dbModule.queryAll(
+      'SELECT b.ZZDWNM, b.RWID, b.XMID, b.ND, b.RYLBMC, b.JXKEY, m.TYPE, m.VALUE ' +
+      'FROM JX_BASE_TABLE b LEFT JOIN JX_MX_TABLE m ON b.JXKEY = m.JXKEY ' +
+      'WHERE b.ZZDWNM = ? ORDER BY b.JXKEY, m.TYPE',
+      [zzdwnm]
+    )
+    res.json({ success: true, data: rows })
+  } catch (e) {
+    res.json({ success: false, error: e.message })
+  }
+})
+
+// ---- 启动服务器 ----
+dbModule.initDB().then(function () {
+  app.listen(3001, function () {
+    console.log('AI 分析服务已启动，端口 3001')
+  })
+}).catch(function (err) {
+  console.error('启动失败：', err)
+  process.exit(1)  
+})
+
+================================================================================
+
+📄 ./table_data.js（175 行）
+
+================================================================================
+
+// YYGL_DATA_TABLE — 主数据表
+// 排序规则：(GLJG+RWID+XMID) → RYLBMC(普通→骨干→核心) → ND(降序) → 层级深度优先
+
+function init(db) {
+  var rows = [
+    // ==============================================================================
+    // GLJG001 集团总部 / RW001 年度绩效考核 / XM001 项目A
+    // ==============================================================================
+
+    // ── 普通 · 2025 ──
+    ['001','成都总部','001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','7',22,1650,18,1350,2,140,1,80,1,80,81.8,72.7,null],
+    ['001001','技术部','001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','3',14,1022,12,876,1,74,1,72,0,0,85.7,79,'001'],
+    ['001001001','前端组','001001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',5,365,4,298,1,67,0,0,0,0,80,80,'001001'],
+    ['001001002','后端组','001001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',6,444,5,380,0,0,1,64,0,0,83.3,83,'001001'],
+    ['001001003','运维组','001001003',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',3,213,3,213,0,0,0,0,0,0,100,100,'001001'],
+    ['001002','产品部','001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',8,608,6,492,1,66,1,50,0,0,75,75,'001'],
+    ['001002001','产品组','001002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',4,300,3,236,1,64,0,0,0,0,75,75,'001002'],
+    ['001002002','设计组','001002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',4,308,3,256,0,0,1,52,0,0,75,100,'001002'],
+    ['002','重庆分部','002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','6',20,1480,18,1368,0,0,1,55,1,57,90,85,null],
+    ['002001','运营部','002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',10,730,9,666,0,0,1,64,0,0,90,80,'002'],
+    ['002001001','策划组','002001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',4,292,4,292,0,0,0,0,0,0,100,75,'002001'],
+    ['002001002','执行组','002001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',6,438,5,374,0,0,1,64,0,0,83.3,83,'002001'],
+    ['002002','客服部','002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',10,750,9,702,0,0,1,48,0,0,90,90,'002'],
+    ['002002001','售前组','002002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',5,360,5,360,0,0,0,0,0,0,100,80,'002002'],
+    ['002002002','售后组','002002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',5,390,4,342,0,0,1,48,0,0,80,100,'002002'],
+    ['003','绵阳分部','003',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','3',12,876,9,684,2,116,0,0,1,76,75,75,null],
+    ['003001','研发部','003001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',12,876,9,684,2,116,0,0,1,76,75,75,'003'],
+    ['003001001','移动组','003001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',6,426,4,340,2,86,0,0,0,0,66.7,67,'003001'],
+    ['003001002','平台组','003001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',6,450,5,390,0,0,0,0,1,60,83.3,83,'003001'],
+    ['004','上海分部','004',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','3',12,864,10,740,1,76,1,48,0,0,83.3,83,null],
+    ['004001','市场部','004001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',12,864,10,740,1,76,1,48,0,0,83.3,83,'004'],
+    ['004001001','推广组','004001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',7,511,6,456,1,55,0,0,0,0,85.7,86,'004001'],
+    ['004001002','调研组','004001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',5,353,4,284,0,0,1,69,0,0,80,80,'004001'],
+    ['005','广州分部','005',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','3',12,876,11,814,0,0,1,62,0,0,91.7,83,null],
+    ['005001','销售部','005001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',12,876,11,814,0,0,1,62,0,0,91.7,83,'005'],
+    ['005001001','演示组','005001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',5,385,5,385,0,0,0,0,0,0,100,80,'005001'],
+    ['005001002','渠道组','005001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','0',7,491,6,429,0,0,1,62,0,0,85.7,86,'005001'],
+
+    // ── 普通 · 2024 ──
+    ['001','成都总部','001',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','6',20,1480,17,1258,1,74,1,80,1,68,85,85,null],
+    ['001001','技术部','001001',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','3',12,876,10,730,1,84,1,62,0,0,83.3,75,'001'],
+    ['001002','产品部','001002',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',8,584,7,526,1,58,0,0,0,0,87.5,75,'001'],
+    ['002','重庆分部','002',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','5',18,1296,17,1224,0,0,1,72,0,0,94.4,83.3,null],
+    ['002001','运营部','002001',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',9,648,9,648,0,0,0,0,0,0,100,78,'002'],
+    ['002002','客服部','002002',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',9,648,8,576,0,0,1,72,0,0,88.9,89,'002'],
+    ['003','绵阳分部','003',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',10,720,8,576,1,72,0,0,1,72,80,80,null],
+    ['003001','研发部','003001',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',10,720,8,576,1,72,0,0,1,72,80,80,'003'],
+    ['004','上海分部','004',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',10,730,9,666,0,0,1,64,0,0,90,90,null],
+    ['004001','市场部','004001',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',10,730,9,666,0,0,1,64,0,0,90,90,'004'],
+    ['005','广州分部','005',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',12,864,10,792,1,72,0,0,1,0,83.3,83,null],
+    ['005001','销售部','005001',2024,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','普通','2',12,864,10,792,1,72,0,0,1,0,83.3,83,'005'],
+
+    // ── 骨干 · 2025 ──
+    ['001','成都总部','001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','3',6,510,6,510,0,0,0,0,0,0,100,100,null],
+    ['001001','技术部','001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',4,340,4,340,0,0,0,0,0,0,100,100,'001'],
+    ['001001001','前端组','001001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',2,176,2,176,0,0,0,0,0,0,100,100,'001001'],
+    ['001001002','后端组','001001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',2,172,2,172,0,0,0,0,0,0,100,100,'001001'],
+    ['001001003','运维组','001001003',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,92,1,92,0,0,0,0,0,0,100,100,'001001'],
+    ['001002','产品部','001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',2,170,2,170,0,0,0,0,0,0,100,100,'001'],
+    ['001002001','产品组','001002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,88,1,88,0,0,0,0,0,0,100,100,'001002'],
+    ['001002002','设计组','001002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,85,1,85,0,0,0,0,0,0,100,100,'001002'],
+    ['002','重庆分部','002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','2',4,352,4,352,0,0,0,0,0,0,100,100,null],
+    ['002001','运营部','002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',2,176,2,176,0,0,0,0,0,0,100,100,'002'],
+    ['002001001','策划组','002001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,88,1,88,0,0,0,0,0,0,100,100,'002001'],
+    ['002001002','执行组','002001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,86,1,86,0,0,0,0,0,0,100,100,'002001'],
+    ['002002','客服部','002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',2,176,2,176,0,0,0,0,0,0,100,100,'002'],
+    ['002002001','售前组','002002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,90,1,90,0,0,0,0,0,0,100,100,'002002'],
+    ['002002002','售后组','002002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,84,1,84,0,0,0,0,0,0,100,100,'002002'],
+    ['003','绵阳分部','003',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',3,264,3,264,0,0,0,0,0,0,100,100,null],
+    ['003001','研发部','003001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',3,264,3,264,0,0,0,0,0,0,100,100,'003'],
+    ['003001001','移动组','003001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,88,1,88,0,0,0,0,0,0,100,100,'003001'],
+    ['003001002','平台组','003001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',2,172,2,172,0,0,0,0,0,0,100,100,'003001'],
+    ['004','上海分部','004',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',3,263,3,263,0,0,0,0,0,0,100,100,null],
+    ['004001','市场部','004001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',3,263,3,263,0,0,0,0,0,0,100,100,'004'],
+    ['004001001','推广组','004001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,86,1,86,0,0,0,0,0,0,100,100,'004001'],
+    ['004001002','调研组','004001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',2,170,2,170,0,0,0,0,0,0,100,100,'004001'],
+    ['005','广州分部','005',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',3,258,3,258,0,0,0,0,0,0,100,100,null],
+    ['005001','销售部','005001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','1',3,258,3,258,0,0,0,0,0,0,100,100,'005'],
+    ['005001001','演示组','005001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,82,1,82,0,0,0,0,0,0,100,100,'005001'],
+    ['005001002','渠道组','005001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','骨干','0',1,80,1,80,0,0,0,0,0,0,100,100,'005001'],
+
+    // ── 核心 · 2025 ──
+    ['001','成都总部','001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',2,188,2,188,0,0,0,0,0,0,100,100,null],
+    ['001001','技术部','001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',2,156,2,156,0,0,0,0,0,0,100,100,'001'],
+    ['001001001','前端组','001001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,89,1,89,0,0,0,0,0,0,100,100,'001001'],
+    ['001001002','后端组','001001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,92,1,92,0,0,0,0,0,0,100,100,'001001'],
+    ['001002','产品部','001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',1,88,1,88,0,0,0,0,0,0,100,100,'001'],
+    ['001002001','产品组','001002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,90,1,90,0,0,0,0,0,0,100,100,'001002'],
+    ['002','重庆分部','002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',1,94,1,94,0,0,0,0,0,0,100,100,null],
+    ['002001','运营部','002001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',1,86,1,86,0,0,0,0,0,0,100,100,'002'],
+    ['002001002','执行组','002001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,91,1,91,0,0,0,0,0,0,100,100,'002001'],
+    ['002002','客服部','002002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',1,82,1,82,0,0,0,0,0,0,100,100,'002'],
+    ['003001','研发部','003001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',2,168,2,168,0,0,0,0,0,0,100,100,'003'],
+    ['003001001','移动组','003001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,90,1,90,0,0,0,0,0,0,100,100,'003001'],
+    ['004001','市场部','004001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',1,88,1,88,0,0,0,0,0,0,100,100,'004'],
+    ['004001001','推广组','004001001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,88,1,88,0,0,0,0,0,0,100,100,'004001'],
+    ['005001','销售部','005001',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','1',2,160,2,160,0,0,0,0,0,0,100,100,'005'],
+    ['005001002','渠道组','005001002',2025,'GLJG001','集团总部','GLJG001','RW001','年度绩效考核','RWLX001','XM001','项目A','核心','0',1,88,1,88,0,0,0,0,0,0,100,100,'005001'],
+
+    // ==============================================================================
+    // GLJG002 战略投资部 / RW001 年度绩效考核 / XM002 项目B
+    // ==============================================================================
+
+    // ── 普通 · 2025 ──
+    ['001','成都总部','001',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','5',16,1152,13,962,2,138,1,52,0,0,81.2,75,null],
+    ['001002','产品部','001002',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','1',4,296,3,246,1,50,0,0,0,0,75,75,'001'],
+    ['002','重庆分部','002',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','4',14,1008,12,876,1,70,1,62,0,0,85.7,79,null],
+    ['002001','运营部','002001',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','1',5,368,4,312,1,56,0,0,0,0,80,80,'002'],
+    ['003','绵阳分部','003',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','2',8,576,7,504,0,0,1,72,0,0,87.5,88,null],
+    ['003001','研发部','003001',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','1',4,290,3,248,0,0,1,42,0,0,75,75,'003'],
+    ['004','上海分部','004',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','2',10,720,8,584,1,80,1,56,0,0,80,80,null],
+    ['004001','市场部','004001',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','1',5,372,4,308,1,64,0,0,0,0,80,80,'004'],
+    ['005','广州分部','005',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','2',10,740,9,675,0,0,1,65,0,0,90,90,null],
+    ['005001','销售部','005001',2025,'GLJG002','战略投资部','GLJG002','RW001','年度绩效考核','RWLX001','XM002','项目B','普通','1',5,365,4,310,0,0,1,55,0,0,80,80,'005'],
+
+    // ==============================================================================
+    // GLJG003 区域管理部 / RW002 专项技能评估 / XM003 项目C
+    // ==============================================================================
+
+    // ── 普通 · 2025 ──
+    ['001','成都总部','001',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','4',10,740,9,666,0,0,1,74,0,0,90,90,null],
+    ['001002','产品部','001002',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','1',3,225,3,225,0,0,0,0,0,0,100,100,'001'],
+    ['002','重庆分部','002',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','3',8,576,8,576,0,0,0,0,0,0,100,100,null],
+    ['002001','运营部','002001',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','1',3,228,3,228,0,0,0,0,0,0,100,100,'002'],
+    ['003','绵阳分部','003',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','2',6,432,6,432,0,0,0,0,0,0,100,100,null],
+    ['003001','研发部','003001',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','1',2,146,2,146,0,0,0,0,0,0,100,100,'003'],
+    ['004','上海分部','004',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','2',8,568,8,568,0,0,0,0,0,0,100,100,null],
+    ['004001','市场部','004001',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','1',3,222,3,222,0,0,0,0,0,0,100,100,'004'],
+    ['005','广州分部','005',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','2',8,584,7,518,0,0,1,66,0,0,87.5,88,null],
+    ['005001','销售部','005001',2025,'GLJG003','区域管理部','GLJG003','RW002','专项技能评估','RWLX002','XM003','项目C','普通','1',3,219,3,219,0,0,0,0,0,0,100,100,'005']
+  ]
+
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS YYGL_DATA_TABLE (
+      ZZDWNM   TEXT    NOT NULL,
+      ZZDWMC   TEXT,
+      ZZDWXH   TEXT,
+      ND       INTEGER,
+      GLJG     TEXT,
+      GLJGMC   TEXT,
+      GLJGXH   TEXT,
+      RWID     TEXT,
+      RWMC     TEXT,
+      RWLXNM   TEXT,
+      XMID     TEXT,
+      XMMC     TEXT,
+      RYLBMC   TEXT,
+      DWGS     TEXT,
+      RYZS     REAL,
+      JXZF     REAL,
+      HYRS     REAL,
+      HYJXZF   REAL,
+      WJHRS    REAL,
+      WJHJXZF  REAL,
+      YFBRS    REAL,
+      YFBJXZF  REAL,
+      DCRS     REAL,
+      DCJXZF   REAL,
+      HYL      REAL,
+      JXPJFL   REAL,
+      PARENTID TEXT
+    )`,
+    'YYGL_DATA_TABLE',
+    function (db) {
+      var stmt = db.prepare(
+        'INSERT INTO YYGL_DATA_TABLE (ZZDWNM,ZZDWMC,ZZDWXH,ND,GLJG,GLJGMC,GLJGXH,RWID,RWMC,RWLXNM,XMID,XMMC,RYLBMC,DWGS,RYZS,JXZF,HYRS,HYJXZF,WJHRS,WJHJXZF,YFBRS,YFBJXZF,DCRS,DCJXZF,HYL,JXPJFL,PARENTID) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+      )
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 YYGL_DATA_TABLE 初始数据')
+    }
+  )
+}
+
+module.exports = { init: init }
+
+================================================================================
+
+📄 ./table_jx_base.js（39 行）
+
+================================================================================
+
+// JX_BASE_TABLE — 指标关联表
+
+ // ============ 字段说明 ============
+  // ZZDWNM 组织单元内码
+  // RWID   任务ID
+  // XMID   项目ID
+  // ND     年度
+  // RYLBMC 人员类别
+  // JXKEY  指标关联主键（指向 JX_MX_TABLE.JXKEY）
+function init(db) {
+  var rows = [
+    ['001',   'RW001','XM001','2025','普通','JX1001'],
+    ['001',   'RW001','XM001','2025','普通','JX1002'],
+    ['001',   'RW001','XM001','2025','普通','JX1003'],
+    ['001001','RW001','XM001','2025','普通','JX1004'],
+    ['001001','RW001','XM001','2025','普通','JX1005'],
+    ['001001','RW001','XM001','2025','普通','JX1006']
+  ]
+
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS JX_BASE_TABLE (
+      ZZDWNM TEXT,
+      RWID   TEXT,
+      XMID   TEXT,
+      ND     TEXT,
+      RYLBMC TEXT,
+      JXKEY  TEXT
+    )`,
+    'JX_BASE_TABLE',
+    function (db) {
+      var stmt = db.prepare('INSERT INTO JX_BASE_TABLE (ZZDWNM,RWID,XMID,ND,RYLBMC,JXKEY) VALUES (?,?,?,?,?,?)')
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 JX_BASE_TABLE 初始数据')
+    }
+  )
+}
+
+module.exports = { init: init }
+
+================================================================================
+
+📄 ./table_jx_mx.js（51 行）
+
+================================================================================
+
+// JX_MX_TABLE — 指标明细表（对应原 ZB_MX_TABLE）
+
+// ============ 字段说明 ============
+  // JXKEY 关联主键（对应 JX_BASE_TABLE.JXKEY）
+  // TYPE  类型：jxlx=指标类型 / title=指标名称 / value=数值 / jldw=计量单位
+  // VALUE 值
+function init(db) {
+  var rows = [
+    ['JX1001','jxlx',  '考核类'],
+    ['JX1001','title', '人均绩效分'],
+    ['JX1001','value', '74.5'],
+    ['JX1001','jldw',  '分'],
+    ['JX1002','jxlx',  '考核类'],
+    ['JX1002','title', '活跃率'],
+    ['JX1002','value', '81.8'],
+    ['JX1002','jldw',  '%'],
+    ['JX1003','jxlx',  '管理类'],
+    ['JX1003','title', '部门覆盖率'],
+    ['JX1003','value', '100'],
+    ['JX1003','jldw',  '%'],
+    ['JX1004','jxlx',  '考核类'],
+    ['JX1004','title', '人均绩效分'],
+    ['JX1004','value', '73.0'],
+    ['JX1004','jldw',  '分'],
+    ['JX1005','jxlx',  '考核类'],
+    ['JX1005','title', '活跃率'],
+    ['JX1005','value', '85.7'],
+    ['JX1005','jldw',  '%'],
+    ['JX1006','jxlx',  '管理类'],
+    ['JX1006','title', '出勤达标率'],
+    ['JX1006','value', '92.3'],
+    ['JX1006','jldw',  '%']
+  ]
+
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS JX_MX_TABLE (
+      JXKEY TEXT,
+      TYPE  TEXT,
+      VALUE TEXT
+    )`,
+    'JX_MX_TABLE',
+    function (db) {
+      var stmt = db.prepare('INSERT INTO JX_MX_TABLE (JXKEY,TYPE,VALUE) VALUES (?,?,?)')
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 JX_MX_TABLE 初始数据')
+    }
+  )
+}
+
+module.exports = { init: init }
+
+================================================================================
+
+📄 ./table_location.js（44 行）
+
+================================================================================
+
+// DW_LOCATION_TABLE — 经纬度关联表
+
+// ============ 字段说明 ============
+  // NM   组织单元内码（主键，层级编码）
+  // JD   经度
+  // WD   纬度
+  // DMMC 地区名称（省/市/区）
+  // DMNM 单位名称
+
+function init(db) {
+  var rows = [
+    ['001',     '104.065735',  '30.659462',  '四川省成都市',           '成都总部'],
+    ['001001',  '104.068735',  '30.661462',  '四川省成都市武侯区',     '技术部'],
+    ['001002',  '104.070735',  '30.657462',  '四川省成都市锦江区',     '产品部'],
+    ['002',     '106.550464',  '29.563009',  '重庆市',                 '重庆分部'],
+    ['002001',  '106.553464',  '29.565009',  '重庆市渝中区',           '运营部'],
+    ['002002',  '106.548464',  '29.561009',  '重庆市江北区',           '客服部'],
+    ['003',     '104.737902',  '31.465658',  '四川省绵阳市',           '绵阳分部'],
+    ['003001',  '104.740902',  '31.467658',  '四川省绵阳市涪城区',     '研发部'],
+    ['004',     '121.480539',  '31.235929',  '上海市',                 '上海分部'],
+    ['004001',  '121.483539',  '31.237929',  '上海市浦东新区',         '市场部'],
+    ['005',     '113.264385',  '23.130063',  '广东省广州市',           '广州分部'],
+    ['005001',  '113.267385',  '23.132063',  '广东省广州市天河区',     '销售部']
+  ]
+
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS DW_LOCATION_TABLE (
+      NM   TEXT PRIMARY KEY,
+      JD   TEXT,
+      WD   TEXT,
+      DMMC TEXT,
+      DMNM TEXT
+    )`,
+    'DW_LOCATION_TABLE',
+    function (db) {
+      var stmt = db.prepare('INSERT INTO DW_LOCATION_TABLE (NM,JD,WD,DMMC,DMNM) VALUES (?,?,?,?,?)')
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 DW_LOCATION_TABLE 初始数据（两层结构：5单位+7部门）')
+    }
+  )
+}
+
+module.exports = { init: init }
+
+================================================================================
+
+📄 ./table_zd.js（82 行）
+
+================================================================================
+
+// YYGL_ZD_TABLE — 字典表
+
+// ============ 字段说明 ============
+  // SSLX 所属类型（RYLBMC=人员类别枚举 / HEADER=表头JSON / INITHEADER=初始表头 / JXMB=绩效数据）
+  // MC   名称或值（枚举时为枚举值，HEADER时为JSON字符串，JXMB时为数值）
+  // NM   关联编码（JXMB时为组织单元内码）
+  // XH   序号
+
+function init(db) {
+  var headerJSON = JSON.stringify([
+    {"id":"f-zzdwmc","type":"field","label":"单位名称","fieldKey":"zzdwmc","align":"left"},
+    {"id":"f-nd","type":"field","label":"年度","fieldKey":"nd","align":"left"},
+    {"id":"f-rwmc","type":"field","label":"任务名称","fieldKey":"rwmc","align":"left"},
+    {"id":"f-xmmc","type":"field","label":"项目名称","fieldKey":"xmmc","align":"left"},
+    {"id":"f-gljgmc","type":"field","label":"管理机构","fieldKey":"gljgmc","align":"left"},
+    {"id":"f-rylbmc","type":"field","label":"人员类别","fieldKey":"rylbmc","align":"left"},
+    {"id":"f-dwgs","type":"field","label":"考核单位数","fieldKey":"dwgs","align":"right"},
+    {"id":"f-ryzs","type":"field","label":"员工总数","fieldKey":"ryzs","align":"right"},
+    {"id":"f-jxzf","type":"field","label":"绩效总分","fieldKey":"jxzf","align":"right"},
+    {"id":"g-jxStats","type":"group","label":"绩效统计","align":"center","children":[
+      {"id":"f-jx_avg","type":"field","label":"平均绩效分","fieldKey":"jx_avg","align":"right"},
+      {"id":"f-jx_min","type":"field","label":"最低绩效分","fieldKey":"jx_min","align":"right"},
+      {"id":"f-jx_max","type":"field","label":"最高绩效分","fieldKey":"jx_max","align":"right"}
+    ]},
+    {"id":"g-ryzt","type":"group","label":"人员状态分布","align":"center","children":[
+      {"id":"g-hy","type":"group","label":"活跃","align":"center","children":[
+        {"id":"f-hyrs","type":"field","label":"人数","fieldKey":"hyrs","align":"right"},
+        {"id":"f-hyjxzf","type":"field","label":"绩效总分","fieldKey":"hyjxzf","align":"right"}
+      ]},
+      {"id":"g-wjh","type":"group","label":"未激活","align":"center","children":[
+        {"id":"f-wjhrs","type":"field","label":"人数","fieldKey":"wjhrs","align":"right"},
+        {"id":"f-wjhjxzf","type":"field","label":"绩效总分","fieldKey":"wjhjxzf","align":"right"}
+      ]},
+      {"id":"g-yfb","type":"group","label":"已封禁","align":"center","children":[
+        {"id":"f-yfbrs","type":"field","label":"人数","fieldKey":"yfbrs","align":"right"},
+        {"id":"f-yfbjxzf","type":"field","label":"绩效总分","fieldKey":"yfbjxzf","align":"right"}
+      ]},
+      {"id":"g-dcp","type":"group","label":"待评估","align":"center","children":[
+        {"id":"f-dcrs","type":"field","label":"人数","fieldKey":"dcrs","align":"right"},
+        {"id":"f-dcjxzf","type":"field","label":"绩效总分","fieldKey":"dcjxzf","align":"right"}
+      ]}
+    ]},
+    {"id":"g-dbl","type":"group","label":"达标率","align":"center","children":[
+      {"id":"f-hyl","type":"field","label":"活跃率%","fieldKey":"hyl","align":"right"},
+      {"id":"f-jxpjfl","type":"field","label":"绩效达标率%","fieldKey":"jxpjfl","align":"right"}
+    ]}
+  ])
+
+  var rows = [
+    ['RYLBMC',    '普通',        null,      1],
+    ['RYLBMC',    '骨干',        null,      2],
+    ['RYLBMC',    '核心',        null,      3],
+    ['GLJG',     '集团总部',      'GLJG001', 1],
+    ['GLJG',     '战略投资部',    'GLJG002', 2],
+    ['GLJG',     '区域管理部',    'GLJG003', 3],
+    ['HEADER',    headerJSON,    null,      1],
+    ['INITHEADER',null,          null,      1],
+    ['JXMB',      '75',          '001',     1],
+    ['JXMB',      '72',          '002',     1],
+    ['JXMB',      '70',          '003',     1],
+    ['JXMB',      '73',          '004',     1],
+    ['JXMB',      '74',          '005',     1]
+  ]
+
+  require('./db').initTable(db,
+    `CREATE TABLE IF NOT EXISTS YYGL_ZD_TABLE (
+      SSLX TEXT,
+      MC   TEXT,
+      NM   TEXT,
+      XH   INTEGER
+    )`,
+    'YYGL_ZD_TABLE',
+    function (db) {
+      var stmt = db.prepare('INSERT INTO YYGL_ZD_TABLE (SSLX,MC,NM,XH) VALUES (?,?,?,?)')
+      rows.forEach(function (r) { stmt.run(r) })
+      stmt.free()
+      console.log('已插入 ' + rows.length + ' 条 YYGL_ZD_TABLE 初始数据')
+    }
+  )
+}
+
+module.exports = { init: init }
